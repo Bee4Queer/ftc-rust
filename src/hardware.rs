@@ -1,7 +1,7 @@
 //! Hardware-related code.
 #![allow(clippy::needless_pass_by_value)]
 
-use std::fmt::{Debug, Display};
+use std::{any::type_name, fmt::{Debug, Display}};
 
 use jni::{
     Env, JavaVM, jni_sig,
@@ -13,6 +13,7 @@ use jni::{
 
 mod devices;
 pub use devices::*;
+use log::{error, trace};
 
 use crate::{call_method, new_global, new_string};
 
@@ -45,31 +46,39 @@ impl Debug for Hardware {
 impl Hardware {
     /// Get a [`Device`] from the hardware map.
     pub fn get<T: Device>(&self, name: impl AsRef<str>) -> T {
+        trace!("getting device `{}` of type `{}`", name.as_ref(), type_name::<T>());
         let object = self
             .vm
             .attach_current_thread(|env| {
                 let class = env.load_class(JNIString::new(T::JAVA_CLASS)).unwrap();
-                let name = new_string!(env env, name).unwrap();
+                let jname = new_string!(env env, name.as_ref()).unwrap();
+                trace!("arguments prepared");
 
-                new_global!(
-                    env,
-                    env.call_method(
+                let res = env.call_method(
                         &self.hardware_map,
                         JNIString::new("get"),
-                        RuntimeMethodSignature::from_str(format!(
-                            "(Ljava/lang/Class;Ljava/lang/String;)L{};",
-                            T::JNI_CLASS
-                        ))
-                        .unwrap()
-                        .method_signature(),
-                        &[(&class).into(), (&name).into()],
-                    )
-                    .unwrap()
-                    .l()
-                    .unwrap()
-                )
+                        jni_sig!("(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Object;"),
+                        &[(&class).into(), (&jname).into()],
+                    );
+
+                trace!("called method");
+                
+                match res {
+                    Ok(res) =>
+                        new_global!(
+                            env,
+                            res.l()
+                            .unwrap()
+                        ),
+                    Err(err) => {
+                        error!("Got error {err} trying to get device `{}`!", name.as_ref());
+                        Err(err)
+                    },
+                }
             })
+            .map_err(|err| panic!("{err}")) // panic payloads are weird
             .unwrap();
+        trace!("got device");
 
         T::from_java(self.vm.clone(), object)
     }

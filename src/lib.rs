@@ -1,11 +1,12 @@
 //! Code for using Rust in FTC robot code.
 
-use std::fmt::{Debug, Display};
+use std::{fmt::Debug, time::Duration};
 
 #[cfg(feature = "proc-macro")]
 pub use ftc_rust_proc::ftc;
 pub use jni;
 use jni::{jni_sig, objects::JObject, refs::Global, strings::JNIString, vm::JavaVM};
+use log::trace;
 
 use crate::{
     command::{Command, SCHEDULER},
@@ -37,7 +38,8 @@ impl Telemetry {
     /// Adds an item to the end if the telemetry being built for driver station display. The caption
     /// and value are shown on the driver station separated by the caption value separator. The
     /// item is removed if `clear` or `clear_all` is called.
-    pub fn add_data(&self, caption: impl Display, value: impl Display) {
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn add_data(&self, caption: impl ToString, value: impl ToString) {
         self.vm
             .attach_current_thread(|env| {
                 let caption = new_string!(env env, caption.to_string()).unwrap();
@@ -46,11 +48,11 @@ impl Telemetry {
                     env env,
                     self.telemetry,
                     "addData",
-                    "(Ljava/lang/String;Ljava/lang/Object;)V",
+                    "(Ljava/lang/String;Ljava/lang/Object;)Lorg/firstinspires/ftc/robotcore/external/Telemetry$Item;",
                     [&caption, &value]
                 )
                 .unwrap();
-                jni::errors::Result::Ok(()) // cannot return a reference
+                jni::errors::Result::Ok(()) // rust wants to know what the return type is
             })
             .unwrap();
     }
@@ -63,7 +65,7 @@ impl Telemetry {
             void self,
             self.telemetry,
             "update",
-            "()V",
+            "()Z",
             []
         );
     }
@@ -90,7 +92,6 @@ impl Telemetry {
 }
 
 /// A gamepad.
-#[must_use]
 pub struct Gamepad {
     /// The java environment.
     vm: JavaVM,
@@ -107,7 +108,7 @@ impl Debug for Gamepad {
     }
 }
 
-/// `snake_case` to `CamelCase`
+/// `snake_case` to `camelCase`, used mostly in macro expansions for Gamepad
 fn snake_to_camel(s: &str) -> String {
     let mut first_done = false;
     s.split('_')
@@ -117,11 +118,11 @@ fn snake_to_camel(s: &str) -> String {
                 first_done = true;
                 return part.to_string();
             }
+            let mut out = String::with_capacity(part.len());
             let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                None => unreachable!(),
-            }
+            out.push_str(&chars.next().unwrap().to_uppercase().collect::<String>());
+            out.push_str(chars.as_str());
+            out
         })
         .collect()
 }
@@ -548,9 +549,7 @@ impl Gamepad {
                         let obj = env.new_local_ref(&self.gamepad).unwrap();
                         env.call_method(
                             &obj,
-                            crate::jni::strings::JNIString::new(
-                                snake_to_camel("left_trigger") + "WasPressed",
-                            ),
+                            crate::jni::strings::JNIString::new("leftTriggerWasPressed"),
                             crate::jni::signature::RuntimeMethodSignature::from_str("()Z")
                                 .unwrap()
                                 .method_signature(),
@@ -574,9 +573,7 @@ impl Gamepad {
                         let obj = env.new_local_ref(&self.gamepad).unwrap();
                         env.call_method(
                             &obj,
-                            crate::jni::strings::JNIString::new(
-                                snake_to_camel("left_trigger") + "WasReleased",
-                            ),
+                            crate::jni::strings::JNIString::new("leftTriggerWasReleased"),
                             crate::jni::signature::RuntimeMethodSignature::from_str("()Z")
                                 .unwrap()
                                 .method_signature(),
@@ -639,9 +636,7 @@ impl Gamepad {
                         let obj = env.new_local_ref(&self.gamepad).unwrap();
                         env.call_method(
                             &obj,
-                            crate::jni::strings::JNIString::new(
-                                snake_to_camel("right_trigger") + "WasPressed",
-                            ),
+                            crate::jni::strings::JNIString::new("rightTriggerWasPressed"),
                             crate::jni::signature::RuntimeMethodSignature::from_str("()Z")
                                 .unwrap()
                                 .method_signature(),
@@ -665,9 +660,7 @@ impl Gamepad {
                         let obj = env.new_local_ref(&self.gamepad).unwrap();
                         env.call_method(
                             &obj,
-                            crate::jni::strings::JNIString::new(
-                                snake_to_camel("right_trigger") + "WasReleased",
-                            ),
+                            crate::jni::strings::JNIString::new("lightTriggerWasReleased"),
                             crate::jni::signature::RuntimeMethodSignature::from_str("()Z")
                                 .unwrap()
                                 .method_signature(),
@@ -766,14 +759,23 @@ impl Clone for FtcContext {
 
 impl FtcContext {
     /// Create a new context.
+    #[doc(hidden)]
     pub fn new<'local>(env: &mut jni::Env<'local>, this: JObject<'local>) -> Self {
+        android_logger::init_once(
+            android_logger::Config::default().with_max_level(log::LevelFilter::Trace),
+        );
+
+        trace!("Rust FTC initalized");
+
         Self {
             this: env.new_global_ref(this).unwrap(),
             vm: env.get_java_vm().unwrap(),
         }
     }
-    /// Return a telemetry struct.
+    /// Return the telemetry object.
     pub fn telemetry(&self) -> Telemetry {
+        trace!("Retrieved telemetry");
+
         let telemetry = self
             .vm
             .attach_current_thread(|env| {
@@ -796,8 +798,10 @@ impl FtcContext {
             telemetry,
         }
     }
-    /// Return a hardware struct.
+    /// Return the hardware object.
     pub fn hardware(&self) -> Hardware {
+        trace!("Retrieved hardware");
+        
         let hardware_map = self
             .vm
             .attach_current_thread(|env| {
@@ -871,6 +875,7 @@ impl FtcContext {
         }
     }
     /// Wait for the driver to press play.
+    #[doc(alias = "waitForStart")]
     pub fn wait_for_start(&self) {
         call_method!(void self, self.this, "waitForStart", "()V", []);
     }
@@ -883,7 +888,12 @@ impl FtcContext {
     pub fn sleep_s(&self, time: f64) {
         self.sleep_ms((time * 1000.0) as i64);
     }
+    /// Sleeps for the given amount of time.
+    pub fn sleep(&self, time: Duration) {
+        self.sleep_ms(time.as_millis() as i64);
+    }
     /// Run the scheduler.
+    #[doc(hidden)]
     pub fn run_scheduler(&self) {
         SCHEDULER.write().unwrap().run(self);
     }

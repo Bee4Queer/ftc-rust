@@ -1,6 +1,6 @@
 [package]
 name = "ftc"
-version = "11.1.0"
+version = "11.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Library for running Rust code on FTC robots."
@@ -12,9 +12,11 @@ categories = ["science::robotics"]
 controller_version = "11.1"
 
 [dependencies]
+android_logger = "0.15.1"
 ftc-rust-proc = { path = "./ftc-rust-proc", optional = true }
 
 jni = "0.22.4"
+log = "0.4.30"
 paste = "1.0.15"
 
 [features]

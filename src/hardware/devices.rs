@@ -3,6 +3,7 @@
 use std::ops::RangeInclusive;
 
 use jni::{JavaVM, objects::JObject, refs::Global, signature::RuntimeMethodSignature};
+use log::trace;
 
 use crate::{
     call_method,
@@ -53,6 +54,7 @@ impl DcMotor {
     /// Sets the logical direction in which this motor operates.
     #[doc(alias = "setDirection")]
     pub fn set_direction(&self, dir: Direction) {
+        trace!("setting direction of DcMotor");
         self.vm
             .attach_current_thread(|env| {
                 let obj = dir.into_jni_object(env);
@@ -67,6 +69,7 @@ impl DcMotor {
                 jni::errors::Result::Ok(()) // cannot return a reference
             })
             .unwrap();
+        trace!("set direction of DcMotor");
     }
 
     /// Returns the current logical direction in which this motor is operating.
