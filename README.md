@@ -1,3 +1,3 @@
 # Rust on FTC
 
-This is the library for <https://github.com/VivIsBee/FtcRustController>. See that repo for more details.
+This is the library for <https://github.com/Bee4Queer/FtcRustController>. See that repo for more details.

@@ -4,7 +4,7 @@ version = "11.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Library for running Rust code on FTC robots."
-repository = "https://github.com/VivIsBee/ftc-rust"
+repository = "https://github.com/Bee4Queer/ftc-rust"
 keywords = ["robot", "robotics", "first-robotics"]
 categories = ["science::robotics"]
 
