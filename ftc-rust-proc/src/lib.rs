@@ -372,8 +372,10 @@ public class {class_name} extends {2} {{
     } else {
         let exported_init_name =
             format_ident!("Java_org_firstinspires_ftc_teamcode_{class_name}_init");
+            
+        // JNI name mangling replaces _ in method names with _1
         let exported_init_loop_name =
-            format_ident!("Java_org_firstinspires_ftc_teamcode_{class_name}_init_loop");
+            format_ident!("Java_org_firstinspires_ftc_teamcode_{class_name}_init_1loop");
         let exported_start_name =
             format_ident!("Java_org_firstinspires_ftc_teamcode_{class_name}_start");
         let exported_loop_name =
