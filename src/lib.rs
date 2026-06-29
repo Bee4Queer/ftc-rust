@@ -985,19 +985,6 @@ impl FtcContext {
         }
         call_method!(void self, self.this, "waitForStart", "()V", []);
     }
-    /// Sleeps for the given amount of milliseconds, or until the thread is interrupted (which
-    /// usually indicates that the `OpMode` has been stopped).
-    pub fn sleep_ms(&self, time: i64) {
-        call_method!(void self, self.this, "sleep", "(J)V", [time]);
-    }
-    /// Sleeps for the given number of seconds.
-    pub fn sleep_s(&self, time: f64) {
-        self.sleep_ms((time * 1000.0) as i64);
-    }
-    /// Sleeps for the given amount of time.
-    pub fn sleep(&self, time: Duration) {
-        self.sleep_ms(time.as_millis() as i64);
-    }
     /// Run the scheduler.
     #[doc(hidden)]
     pub fn run_scheduler(&self) {
@@ -1157,3 +1144,5 @@ impl IterativeContext {
         }
     }
 }
+
+pub mod policy;
