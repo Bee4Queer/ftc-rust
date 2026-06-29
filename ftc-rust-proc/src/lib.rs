@@ -296,6 +296,7 @@ import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 @{1}(name = "{}"{})
 {}
 public class {class_name} extends {2} {{
+    private long rust_id;
     {}
 
     static {{
@@ -361,6 +362,7 @@ public class {class_name} extends {2} {{
                     ::ftc::command::Command::schedule(cmd);
 
                     ctx.run_scheduler();
+                    ::ftc::command::get_scheduler().wait_until_queue_clear();
 
                     Ok(())
                 });
@@ -372,7 +374,7 @@ public class {class_name} extends {2} {{
     } else {
         let exported_init_name =
             format_ident!("Java_org_firstinspires_ftc_teamcode_{class_name}_init");
-            
+
         // JNI name mangling replaces _ in method names with _1
         let exported_init_loop_name =
             format_ident!("Java_org_firstinspires_ftc_teamcode_{class_name}_init_1loop");
@@ -398,6 +400,7 @@ public class {class_name} extends {2} {{
                     this: ::ftc::jni::objects::JObject<'local>
                 ) {
                 let outcome = unowned_env.with_env(|env| -> ::ftc::jni::errors::Result<_> {
+                    ::ftc::log::trace!(concat!("initalizing ", stringify!(#class_name)));
                     let mut iterative = ::ftc::IterativeContext::get_for(
                         env,
                         &this,
@@ -411,6 +414,8 @@ public class {class_name} extends {2} {{
                     #func_name (&iterative);
 
                     iterative.call_init(&ctx);
+
+                    ::ftc::log::trace!(concat!("initalized ", stringify!(#class_name), ", beginning scheduler"));
 
                     ctx.run_scheduler();
 
@@ -433,7 +438,7 @@ public class {class_name} extends {2} {{
                         &this,
                     );
 
-                    let mut ctx = ::ftc::FtcContext::new(
+                    let mut ctx = ::ftc::FtcContext::new_no_log(
                         env,
                         this,
                     );
@@ -459,7 +464,7 @@ public class {class_name} extends {2} {{
                         &this,
                     );
 
-                    let mut ctx = ::ftc::FtcContext::new(
+                    let mut ctx = ::ftc::FtcContext::new_no_log(
                         env,
                         this,
                     );
@@ -485,7 +490,7 @@ public class {class_name} extends {2} {{
                         &this,
                     );
 
-                    let mut ctx = ::ftc::FtcContext::new(
+                    let mut ctx = ::ftc::FtcContext::new_no_log(
                         env,
                         this,
                     );
@@ -511,7 +516,7 @@ public class {class_name} extends {2} {{
                         &this,
                     );
 
-                    let mut ctx = ::ftc::FtcContext::new(
+                    let mut ctx = ::ftc::FtcContext::new_no_log(
                         env,
                         this,
                     );

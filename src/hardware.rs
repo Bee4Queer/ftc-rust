@@ -21,7 +21,7 @@ use log::{error, trace};
 use crate::{call_method, new_global, new_string};
 
 /// A device that can be made from a java object.
-pub trait Device {
+pub trait Device: Default {
     /// Create a new instance of this type from the java environment and the relevant object.
     fn from_java(vm: JavaVM, object: Global<JObject<'static>>) -> Self;
     /// The Java-formatted class name. Unlike other JNI things, this uses dots.

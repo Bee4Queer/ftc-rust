@@ -1,17 +1,18 @@
 //! Code for using Rust in FTC robot code.
 
 use std::{
+    any::Any,
     collections::HashMap,
     fmt::Debug,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex, atomic::AtomicI64},
     time::Duration,
 };
 
 #[cfg(feature = "proc-macro")]
 pub use ftc_rust_proc::ftc;
 pub use jni;
-pub use log;
 use jni::{jni_sig, jni_str, objects::JObject, refs::Global, strings::JNIString, vm::JavaVM};
+pub use log;
 use log::{trace, warn};
 
 use crate::{
@@ -743,15 +744,11 @@ pub struct FtcContext {
     this: Global<JObject<'static>>,
 }
 
-/// Hash an object. Uses `hashCode`, meaning a null reference will always return 0.
-fn hash_object<'local>(env: &mut jni::Env<'local>, this: &JObject<'local>) -> i32 {
-    env.call_method(
-        this,
-        jni_str!("hashCode"),
-        jni_sig!("()I"),
-        &[],
-    ).unwrap().into_int().unwrap()
-}
+/// User state
+static STATE: LazyLock<Mutex<HashMap<i64, Box<dyn Any + Send + Sync + 'static>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static OPMODE_COUNTER: AtomicI64 = AtomicI64::new(1);
 
 impl Debug for FtcContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -789,24 +786,67 @@ impl FtcContext {
 
         trace!("Rust FTC initalized");
 
-        Self {
+        Self::new_no_log(env, this)
+    }
+    /// Create a new context.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new_no_log<'local>(env: &mut jni::Env<'local>, this: JObject<'local>) -> Self {
+        let out = Self {
             this: env.new_global_ref(this).unwrap(),
             vm: env.get_java_vm().unwrap(),
+        };
+        if out.get_id() == 0 {
+            out.vm
+                .attach_current_thread(|env| {
+                    let local_ref = env.new_local_ref(&out.this)?;
+                    env.set_field(
+                        local_ref,
+                        jni_str!("rust_id"),
+                        jni_sig!("J"),
+                        OPMODE_COUNTER
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                            .into(),
+                    )?;
+                    jni::errors::Result::Ok(())
+                })
+                .unwrap();
         }
+        out
     }
-    /// Get a hash value for this. Wrapper around Java's Object.hashCode.
-    pub fn get_hash(&self) -> i32 {
-        self
-        .vm
-        .attach_current_thread(|env| {
-            let local_ref = env.new_local_ref(&self.this)?;
-            jni::errors::Result::Ok(hash_object(env, &local_ref))
-        }).unwrap()
+    /// Call a method with the state of this context. Panics if the associated state isn't the provided type.
+    pub fn with_state<State: Any + Default + Send + Sync + 'static, R>(
+        &self,
+        f: impl FnOnce(&mut State) -> R,
+    ) -> R {
+        let mut lock = STATE.lock().unwrap();
+        let state = lock
+            .entry(self.get_id())
+            .or_insert_with(|| Box::new(State::default()))
+            .downcast_mut::<State>()
+            .unwrap();
+        f(state)
+    }
+    /// Get the unique ID for this opmode.
+    pub fn get_id(&self) -> i64 {
+        self.vm
+            .attach_current_thread(|env| {
+                let local_ref = env.new_local_ref(&self.this)?;
+                jni::errors::Result::Ok(
+                    env.get_field(local_ref, jni_str!("rust_id"), jni_sig!("J"))?
+                        .into_long()
+                        .unwrap(),
+                )
+            })
+            .unwrap()
     }
     /// Whether the currently running opmode is iterative.
     #[must_use]
     pub fn is_iterative(&self) -> bool {
-        ITERATIVE_CONTEXTS.lock().unwrap().contains_key(&self.get_hash())
+        ITERATIVE_CONTEXTS
+            .lock()
+            .unwrap()
+            .contains_key(&self.get_id())
     }
     /// Whether the currently running opmode is linear.
     #[must_use]
@@ -817,7 +857,15 @@ impl FtcContext {
     #[must_use]
     pub fn current_stage(&self) -> OpModeStage {
         if self.is_iterative() {
-            ITERATIVE_CONTEXTS.lock().unwrap().get(&self.get_hash()).unwrap().inner.lock().unwrap().stage
+            ITERATIVE_CONTEXTS
+                .lock()
+                .unwrap()
+                .get(&self.get_id())
+                .unwrap()
+                .inner
+                .lock()
+                .unwrap()
+                .stage
         } else if self.running() {
             OpModeStage::Running
         } else if call_method!(bool self, self.this, "opModeInInit", "()Z", []) {
@@ -953,7 +1001,7 @@ impl FtcContext {
     /// Run the scheduler.
     #[doc(hidden)]
     pub fn run_scheduler(&self) {
-        SCHEDULER.write().unwrap().run(self);
+        SCHEDULER.write().unwrap().run(self.clone());
     }
     /// Returns whether the `OpMode` is still running. If not (and a linear opmode), the op mode should exit as fast as
     /// possible.
@@ -1001,7 +1049,7 @@ pub enum OpModeStage {
 }
 
 /// The actual contexts. Used by [`IterativeContext::get_for`].
-static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<i32, IterativeContext>>> =
+static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<i64, IterativeContext>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The actual data for [`IterativeContext`]
@@ -1038,8 +1086,10 @@ impl Debug for IterativeContext {
 impl IterativeContext {
     #[doc(hidden)]
     pub fn get_for<'local>(env: &mut jni::Env<'local>, this: &JObject<'local>) -> Self {
-        let hash = hash_object(env, this);
-        match ITERATIVE_CONTEXTS.lock().unwrap().entry(hash) {
+        let this = env.new_local_ref(this).unwrap();
+
+        let id = FtcContext::new_no_log(env, this).get_id();
+        match ITERATIVE_CONTEXTS.lock().unwrap().entry(id) {
             std::collections::hash_map::Entry::Occupied(occupied_entry) => {
                 occupied_entry.get().clone()
             }
@@ -1107,4 +1157,3 @@ impl IterativeContext {
         }
     }
 }
-

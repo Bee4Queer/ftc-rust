@@ -1,5 +1,13 @@
 //! Convinence macros.
 
+/// Call a java method on a Device.
+#[macro_export]
+macro_rules! call_method_device {
+    ($ty:ident $self:expr, $($tt:tt)+) => {
+        $crate::call_method!($ty $self.inner.as_ref().unwrap(), $($tt)+)
+    };
+}
+
 /// Call a java method.
 #[macro_export]
 macro_rules! call_method {
