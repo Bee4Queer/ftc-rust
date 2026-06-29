@@ -1,7 +1,10 @@
 //! Hardware-related code.
 #![allow(clippy::needless_pass_by_value)]
 
-use std::{any::type_name, fmt::{Debug, Display}};
+use std::{
+    any::type_name,
+    fmt::{Debug, Display},
+};
 
 use jni::{
     Env, JavaVM, jni_sig,
@@ -46,7 +49,11 @@ impl Debug for Hardware {
 impl Hardware {
     /// Get a [`Device`] from the hardware map.
     pub fn get<T: Device>(&self, name: impl AsRef<str>) -> T {
-        trace!("getting device `{}` of type `{}`", name.as_ref(), type_name::<T>());
+        trace!(
+            "getting device `{}` of type `{}`",
+            name.as_ref(),
+            type_name::<T>()
+        );
         let object = self
             .vm
             .attach_current_thread(|env| {
@@ -55,25 +62,20 @@ impl Hardware {
                 trace!("arguments prepared");
 
                 let res = env.call_method(
-                        &self.hardware_map,
-                        JNIString::new("get"),
-                        jni_sig!("(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Object;"),
-                        &[(&class).into(), (&jname).into()],
-                    );
+                    &self.hardware_map,
+                    JNIString::new("get"),
+                    jni_sig!("(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Object;"),
+                    &[(&class).into(), (&jname).into()],
+                );
 
                 trace!("called method");
-                
+
                 match res {
-                    Ok(res) =>
-                        new_global!(
-                            env,
-                            res.l()
-                            .unwrap()
-                        ),
+                    Ok(res) => new_global!(env, res.l().unwrap()),
                     Err(err) => {
                         error!("Got error {err} trying to get device `{}`!", name.as_ref());
                         Err(err)
-                    },
+                    }
                 }
             })
             .map_err(|err| panic!("{err}")) // panic payloads are weird

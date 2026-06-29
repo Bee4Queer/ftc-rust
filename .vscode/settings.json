@@ -1,6 +1,5 @@
 {
     "rust-analyzer.check.command": "clippy",
-    "git.enabled": false,
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",
         "ftc-rust-proc/Cargo.toml"

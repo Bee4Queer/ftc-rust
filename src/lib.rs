@@ -1,12 +1,18 @@
 //! Code for using Rust in FTC robot code.
 
-use std::{fmt::Debug, time::Duration};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    sync::{Arc, LazyLock, Mutex},
+    time::Duration,
+};
 
 #[cfg(feature = "proc-macro")]
 pub use ftc_rust_proc::ftc;
 pub use jni;
-use jni::{jni_sig, objects::JObject, refs::Global, strings::JNIString, vm::JavaVM};
-use log::trace;
+pub use log;
+use jni::{jni_sig, jni_str, objects::JObject, refs::Global, strings::JNIString, vm::JavaVM};
+use log::{trace, warn};
 
 use crate::{
     command::{Command, SCHEDULER},
@@ -92,6 +98,7 @@ impl Telemetry {
 }
 
 /// A gamepad.
+#[must_use]
 pub struct Gamepad {
     /// The java environment.
     vm: JavaVM,
@@ -736,6 +743,16 @@ pub struct FtcContext {
     this: Global<JObject<'static>>,
 }
 
+/// Hash an object. Uses `hashCode`, meaning a null reference will always return 0.
+fn hash_object<'local>(env: &mut jni::Env<'local>, this: &JObject<'local>) -> i32 {
+    env.call_method(
+        this,
+        jni_str!("hashCode"),
+        jni_sig!("()I"),
+        &[],
+    ).unwrap().into_int().unwrap()
+}
+
 impl Debug for FtcContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("(opaque FtcContext object)")
@@ -760,16 +777,53 @@ impl Clone for FtcContext {
 impl FtcContext {
     /// Create a new context.
     #[doc(hidden)]
+    #[must_use]
     pub fn new<'local>(env: &mut jni::Env<'local>, this: JObject<'local>) -> Self {
-        android_logger::init_once(
-            android_logger::Config::default().with_max_level(log::LevelFilter::Trace),
-        );
+        android_logger::init_once(android_logger::Config::default().with_max_level(
+            if cfg!(debug_assertions) {
+                log::LevelFilter::Trace
+            } else {
+                log::LevelFilter::Warn
+            },
+        ));
 
         trace!("Rust FTC initalized");
 
         Self {
             this: env.new_global_ref(this).unwrap(),
             vm: env.get_java_vm().unwrap(),
+        }
+    }
+    /// Get a hash value for this. Wrapper around Java's Object.hashCode.
+    pub fn get_hash(&self) -> i32 {
+        self
+        .vm
+        .attach_current_thread(|env| {
+            let local_ref = env.new_local_ref(&self.this)?;
+            jni::errors::Result::Ok(hash_object(env, &local_ref))
+        }).unwrap()
+    }
+    /// Whether the currently running opmode is iterative.
+    #[must_use]
+    pub fn is_iterative(&self) -> bool {
+        ITERATIVE_CONTEXTS.lock().unwrap().contains_key(&self.get_hash())
+    }
+    /// Whether the currently running opmode is linear.
+    #[must_use]
+    pub fn is_linear(&self) -> bool {
+        !self.is_iterative()
+    }
+    /// The current stage of the opmode.
+    #[must_use]
+    pub fn current_stage(&self) -> OpModeStage {
+        if self.is_iterative() {
+            ITERATIVE_CONTEXTS.lock().unwrap().get(&self.get_hash()).unwrap().inner.lock().unwrap().stage
+        } else if self.running() {
+            OpModeStage::Running
+        } else if call_method!(bool self, self.this, "opModeInInit", "()Z", []) {
+            OpModeStage::Init
+        } else {
+            OpModeStage::Stop
         }
     }
     /// Return the telemetry object.
@@ -801,7 +855,7 @@ impl FtcContext {
     /// Return the hardware object.
     pub fn hardware(&self) -> Hardware {
         trace!("Retrieved hardware");
-        
+
         let hardware_map = self
             .vm
             .attach_current_thread(|env| {
@@ -877,6 +931,10 @@ impl FtcContext {
     /// Wait for the driver to press play.
     #[doc(alias = "waitForStart")]
     pub fn wait_for_start(&self) {
+        if !self.is_linear() {
+            warn!("wait_for_start only exists in linear op modes; returning immediately");
+            return;
+        }
         call_method!(void self, self.this, "waitForStart", "()V", []);
     }
     /// Sleeps for the given amount of milliseconds, or until the thread is interrupted (which
@@ -897,11 +955,156 @@ impl FtcContext {
     pub fn run_scheduler(&self) {
         SCHEDULER.write().unwrap().run(self);
     }
-    /// Returns whether the `OpMode` is still running. If not, the op mode should exit as fast as
+    /// Returns whether the `OpMode` is still running. If not (and a linear opmode), the op mode should exit as fast as
     /// possible.
     #[doc(alias = "opModeIsActive")]
     #[must_use]
     pub fn running(&self) -> bool {
+        if self.is_iterative() {
+            return self.current_stage() == OpModeStage::Running;
+        }
         call_method!(bool self, self.this, "opModeIsActive", "()Z", [])
     }
+    /// Get the amount of time the opmode has been running for.
+    #[doc(alias = "getRuntime")]
+    #[must_use]
+    pub fn runtime(&self) -> Duration {
+        let secs = call_method!(float self, self.this, "getRuntime", "()F", []);
+        Duration::from_secs_f32(secs)
+    }
+    /// Reset the opmode's runtime.
+    #[doc(alias = "resetRuntime")]
+    pub fn reset_runtime(&self) {
+        call_method!(void self, self.this, "resetRuntime", "()V", []);
+    }
+    /// Terminate the opmode NOW. Does not wait for anything. This function does not return.
+    #[doc(alias = "terminateOpModeNow")]
+    pub fn terminate_opmode(&self) -> ! {
+        call_method!(void self, self.this, "terminateOpModeNow", "()V", []);
+        unreachable!();
+    }
+    /// Terminate the opmode, as if the driver had pressed the stop button on the controller.
+    #[doc(alias = "requestOpModeStop")]
+    pub fn request_stop(&self) {
+        call_method!(void self, self.this, "requestOpModeStop", "()V", []);
+    }
 }
+
+/// The current stage of an iterative opmode.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(missing_docs)]
+pub enum OpModeStage {
+    #[default]
+    Init,
+    Running,
+    Stop,
+}
+
+/// The actual contexts. Used by [`IterativeContext::get_for`].
+static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<i32, IterativeContext>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The actual data for [`IterativeContext`]
+#[derive(Default)]
+#[allow(clippy::type_complexity)]
+struct InnerIterativeContext {
+    /// `init` callbacks
+    init: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    /// `init_loop` callbacks
+    init_loop: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    /// `start` callbacks
+    start: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    /// `r#loop` callbacks
+    r#loop: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    /// `stop` callbacks
+    stop: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    /// The current stage of this opmode.
+    stage: OpModeStage,
+}
+
+/// Type used to register callbacks for an iterative op mode.
+#[derive(Clone)]
+pub struct IterativeContext {
+    /// The reference-counted actual data.
+    inner: Arc<Mutex<InnerIterativeContext>>,
+}
+
+impl Debug for IterativeContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(opaque IterativeContext object)")
+    }
+}
+
+impl IterativeContext {
+    #[doc(hidden)]
+    pub fn get_for<'local>(env: &mut jni::Env<'local>, this: &JObject<'local>) -> Self {
+        let hash = hash_object(env, this);
+        match ITERATIVE_CONTEXTS.lock().unwrap().entry(hash) {
+            std::collections::hash_map::Entry::Occupied(occupied_entry) => {
+                occupied_entry.get().clone()
+            }
+            std::collections::hash_map::Entry::Vacant(vacant_entry) => vacant_entry
+                .insert(IterativeContext {
+                    inner: Arc::new(Mutex::new(InnerIterativeContext::default())),
+                })
+                .clone(),
+        }
+    }
+    /// Register a new callback for the `init` function. Does NOT overwrite any previous callbacks and just adds another.
+    pub fn init(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
+        self.inner.lock().unwrap().init.push(Box::new(f));
+    }
+    /// Register a new callback for the `init_loop` function. Does NOT overwrite any previous callbacks and just adds another.
+    pub fn init_loop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
+        self.inner.lock().unwrap().init_loop.push(Box::new(f));
+    }
+    /// Register a new callback for the `start` function. Does NOT overwrite any previous callbacks and just adds another.
+    pub fn start(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
+        self.inner.lock().unwrap().start.push(Box::new(f));
+    }
+    /// Register a new callback for the `loop` function. Does NOT overwrite any previous callbacks and just adds another.
+    pub fn r#loop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
+        self.inner.lock().unwrap().r#loop.push(Box::new(f));
+    }
+    /// Register a new callback for the `stop` function. Does NOT overwrite any previous callbacks and just adds another.
+    pub fn stop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
+        self.inner.lock().unwrap().stop.push(Box::new(f));
+    }
+
+    #[doc(hidden)]
+    pub fn call_init(&mut self, ctx: &FtcContext) {
+        self.inner.lock().unwrap().stage = OpModeStage::Init;
+        for f in &mut self.inner.lock().unwrap().init {
+            f(ctx);
+        }
+    }
+    #[doc(hidden)]
+    pub fn call_init_loop(&mut self, ctx: &FtcContext) {
+        self.inner.lock().unwrap().stage = OpModeStage::Init;
+        for f in &mut self.inner.lock().unwrap().init_loop {
+            f(ctx);
+        }
+    }
+    #[doc(hidden)]
+    pub fn call_start(&mut self, ctx: &FtcContext) {
+        self.inner.lock().unwrap().stage = OpModeStage::Running;
+        for f in &mut self.inner.lock().unwrap().start {
+            f(ctx);
+        }
+    }
+    #[doc(hidden)]
+    pub fn call_loop(&mut self, ctx: &FtcContext) {
+        self.inner.lock().unwrap().stage = OpModeStage::Running;
+        for f in &mut self.inner.lock().unwrap().r#loop {
+            f(ctx);
+        }
+    }
+    #[doc(hidden)]
+    pub fn call_stop(&mut self, ctx: &FtcContext) {
+        self.inner.lock().unwrap().stage = OpModeStage::Stop;
+        for f in &mut self.inner.lock().unwrap().stop {
+            f(ctx);
+        }
+    }
+}
+
