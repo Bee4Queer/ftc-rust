@@ -49,8 +49,8 @@ impl Telemetry {
     pub fn add_data(&self, caption: impl ToString, value: impl ToString) {
         self.vm
             .attach_current_thread(|env| {
-                let caption = new_string!(env env, caption.to_string()).unwrap();
-                let value = new_string!(env env, value.to_string()).unwrap();
+                let caption = new_string!(env env, caption.to_string())?;
+                let value = new_string!(env env, value.to_string())?;
                 call_method!(
                     env env,
                     self.telemetry,
@@ -58,7 +58,7 @@ impl Telemetry {
                     "(Ljava/lang/String;Ljava/lang/Object;)Lorg/firstinspires/ftc/robotcore/external/Telemetry$Item;",
                     [&caption, &value]
                 )
-                .unwrap();
+                ?;
                 jni::errors::Result::Ok(()) // rust wants to know what the return type is
             })
             .unwrap();
@@ -306,7 +306,7 @@ macro_rules! gamepad_button {
                         JNIString::new(stringify!($name)),
                         jni_sig!("Z"),
                     )
-                    .unwrap()
+                    ?
                     .z()
                 })
                 .unwrap()
@@ -392,7 +392,7 @@ macro_rules! gamepad_button {
                             JNIString::new(stringify!($name)),
                             jni_sig!("F"),
                         )
-                        .unwrap()
+                        ?
                         .f()
                     })
                     .unwrap()
@@ -540,8 +540,7 @@ impl Gamepad {
                     &self.gamepad,
                     JNIString::new("left_trigger_pressed"),
                     jni_sig!("Z"),
-                )
-                .unwrap()
+                )?
                 .z()
             })
             .unwrap()
@@ -554,17 +553,15 @@ impl Gamepad {
                 .attach_current_thread(|env| {
                     {
                         let env: &mut crate::jni::Env = env;
-                        let obj = env.new_local_ref(&self.gamepad).unwrap();
+                        let obj = env.new_local_ref(&self.gamepad)?;
                         env.call_method(
                             &obj,
                             crate::jni::strings::JNIString::new("leftTriggerWasPressed"),
-                            crate::jni::signature::RuntimeMethodSignature::from_str("()Z")
-                                .unwrap()
+                            crate::jni::signature::RuntimeMethodSignature::from_str("()Z")?
                                 .method_signature(),
                             &[],
                         )
-                    }
-                    .unwrap()
+                    }?
                     .z()
                 })
                 .unwrap()
@@ -578,17 +575,15 @@ impl Gamepad {
                 .attach_current_thread(|env| {
                     {
                         let env: &mut crate::jni::Env = env;
-                        let obj = env.new_local_ref(&self.gamepad).unwrap();
+                        let obj = env.new_local_ref(&self.gamepad)?;
                         env.call_method(
                             &obj,
                             crate::jni::strings::JNIString::new("leftTriggerWasReleased"),
-                            crate::jni::signature::RuntimeMethodSignature::from_str("()Z")
-                                .unwrap()
+                            crate::jni::signature::RuntimeMethodSignature::from_str("()Z")?
                                 .method_signature(),
                             &[],
                         )
-                    }
-                    .unwrap()
+                    }?
                     .z()
                 })
                 .unwrap()
@@ -627,8 +622,7 @@ impl Gamepad {
                     &self.gamepad,
                     JNIString::new("right_trigger_pressed"),
                     jni_sig!("Z"),
-                )
-                .unwrap()
+                )?
                 .z()
             })
             .unwrap()
@@ -641,17 +635,15 @@ impl Gamepad {
                 .attach_current_thread(|env| {
                     {
                         let env: &mut crate::jni::Env = env;
-                        let obj = env.new_local_ref(&self.gamepad).unwrap();
+                        let obj = env.new_local_ref(&self.gamepad)?;
                         env.call_method(
                             &obj,
                             crate::jni::strings::JNIString::new("rightTriggerWasPressed"),
-                            crate::jni::signature::RuntimeMethodSignature::from_str("()Z")
-                                .unwrap()
+                            crate::jni::signature::RuntimeMethodSignature::from_str("()Z")?
                                 .method_signature(),
                             &[],
                         )
-                    }
-                    .unwrap()
+                    }?
                     .z()
                 })
                 .unwrap()
@@ -665,17 +657,15 @@ impl Gamepad {
                 .attach_current_thread(|env| {
                     {
                         let env: &mut crate::jni::Env = env;
-                        let obj = env.new_local_ref(&self.gamepad).unwrap();
+                        let obj = env.new_local_ref(&self.gamepad)?;
                         env.call_method(
                             &obj,
                             crate::jni::strings::JNIString::new("lightTriggerWasReleased"),
-                            crate::jni::signature::RuntimeMethodSignature::from_str("()Z")
-                                .unwrap()
+                            crate::jni::signature::RuntimeMethodSignature::from_str("()Z")?
                                 .method_signature(),
                             &[],
                         )
-                    }
-                    .unwrap()
+                    }?
                     .z()
                 })
                 .unwrap()
@@ -762,7 +752,7 @@ impl Clone for FtcContext {
             this: self
                 .vm
                 .attach_current_thread(|env| {
-                    let local_ref = env.new_local_ref(&self.this).unwrap();
+                    let local_ref = env.new_local_ref(&self.this)?;
                     env.new_global_ref(local_ref)
                 })
                 .unwrap(),
@@ -887,10 +877,8 @@ impl FtcContext {
                         &self.this,
                         JNIString::new("telemetry"),
                         jni_sig!("Lorg/firstinspires/ftc/robotcore/external/Telemetry;"),
-                    )
-                    .unwrap()
-                    .l()
-                    .unwrap()
+                    )?
+                    .l()?
                 )
             })
             .unwrap();
@@ -913,10 +901,8 @@ impl FtcContext {
                         &self.this,
                         JNIString::new("hardwareMap"),
                         jni_sig!("Lcom/qualcomm/robotcore/hardware/HardwareMap;"),
-                    )
-                    .unwrap()
-                    .l()
-                    .unwrap()
+                    )?
+                    .l()?
                 )
             })
             .unwrap();
@@ -937,10 +923,8 @@ impl FtcContext {
                         &self.this,
                         JNIString::new("gamepad1"),
                         jni_sig!("Lcom/qualcomm/robotcore/hardware/Gamepad;"),
-                    )
-                    .unwrap()
-                    .l()
-                    .unwrap()
+                    )?
+                    .l()?
                 )
             })
             .unwrap();
@@ -962,10 +946,8 @@ impl FtcContext {
                         &self.this,
                         JNIString::new("gamepad2"),
                         jni_sig!("Lcom/qualcomm/robotcore/hardware/Gamepad;"),
-                    )
-                    .unwrap()
-                    .l()
-                    .unwrap()
+                    )?
+                    .l()?
                 )
             })
             .unwrap();
@@ -1016,7 +998,7 @@ impl FtcContext {
     #[doc(alias = "terminateOpModeNow")]
     pub fn terminate_opmode(&self) -> ! {
         call_method!(void self, self.this, "terminateOpModeNow", "()V", []);
-        unreachable!();
+        unreachable!("terminateOpModeNow did not diverge");
     }
     /// Terminate the opmode, as if the driver had pressed the stop button on the controller.
     #[doc(alias = "requestOpModeStop")]
@@ -1146,3 +1128,165 @@ impl IterativeContext {
 }
 
 pub mod policy;
+
+/// Better panic! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! panic {
+    () => {
+        $crate::panic!("explicit panic");
+    };
+    ($($arg:tt)+) => {
+        {
+            let s = format!($($arg)*);
+            $crate::log::error!("{s}");
+            ::std::panic!("{s}");
+        }
+    };
+}
+
+/// Better unimplemented! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! unimplemented {
+    () => {
+        $crate::panic!("not implemented")
+    };
+    ($($arg:tt)+) => {
+        $crate::panic!("not implemented: {}", ::std::format_args!($($arg)+))
+    };
+}
+
+/// Better todo! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! todo {
+    () => {
+        $crate::panic!("not yet implemented")
+    };
+    ($($arg:tt)+) => {
+        $crate::panic!("not yet implemented: {}", ::std::format_args!($($arg)+))
+    };
+}
+
+/// Better unreachable! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! unreachable {
+    () => {
+        $crate::panic!("nternal error: entered unreachable code")
+    };
+    ($($arg:tt)+) => {
+        $crate::panic!("nternal error: entered unreachable code: {}", ::std::format_args!($($arg)+))
+    };
+}
+
+/// Better assert! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! assert {
+    ($condition:expr $(,)?) => {
+        {let cond: bool = $condition;
+        if (!cond) {
+            let s = concat!("assert at ", ::std::file!(), ":", ::std::line!(), ":", ::std::column!(), " failed");
+            $crate::log::error!("{s}");
+            ::std::panic!("{s}");
+        }}
+    };
+    ($condition:expr, $($tt:tt)+) => {
+        {let cond: bool = $condition;
+        if (!cond) {
+            let s = format!("{}{}", concat!("assert at ", ::std::file!(), ":", ::std::line!(), ":", ::std::column!(), " failed: "), format!($($tt)+));
+            $crate::log::error!("{s}");
+            ::std::panic!("{s}");
+        }}
+    };
+}
+
+/// Better debug_assert_eq! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! assert_eq {
+    ($val1:expr, $val2:expr $(,)?) => {
+        $crate::assert!($val1 == $val2)
+    };
+    ($val1:expr, $val2:expr, $($tt:tt)+) => {
+        $crate::assert!($val1 == $val2, $($tt)+)
+    };
+}
+
+/// Better assert_ne! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! assert_ne {
+    ($val1:expr, $val2:expr $(,)?) => {
+        $crate::assert!($val1 != $val2)
+    };
+    ($val1:expr, $val2:expr, $($tt:tt)+) => {
+        $crate::assert!($val1 != $val2, $($tt)+)
+    };
+}
+
+/// Better assert_matches! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! assert_matches {
+    ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
+        $crate::assert!(matches!($expression, $pattern $(if $guard)?))
+    };
+    ($expression:expr, $pattern:pat $(if $guard:expr)?, $($tt:tt)+) => {
+        $crate::assert!(matches!($expression, $pattern $(if $guard)?), $($tt)+)
+    };
+}
+
+/// Better debug_assert! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! debug_assert {
+    ($condition:expr $(,)?) => {
+        if ::std::cfg!(debug_assertions) {
+            $crate::assert!($condition);
+        }
+    };
+    ($condition:expr, $($tt:tt)+) => {
+        if ::std::cfg!(debug_assertions) {
+            $crate::assert!($condition, $($tt)+);
+        }
+    };
+}
+
+/// Better debug_assert_eq! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! debug_assert_eq {
+    ($val1:expr, $val2:expr $(,)?) => {
+        if ::std::cfg!(debug_assertions) {
+            $crate::assert!($val1 == $val2);
+        }
+    };
+    ($val1:expr, $val2:expr, $($tt:tt)+) => {
+        if ::std::cfg!(debug_assertions) {
+            $crate::assert!($val1 == $val2, $($tt)+);
+        }
+    };
+}
+
+/// Better debug_assert_ne! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! debug_assert_ne {
+    ($val1:expr, $val2:expr $(,)?) => {
+        if ::std::cfg!(debug_assertions) {
+            $crate::assert!($val1 != $val2);
+        }
+    };
+    ($val1:expr, $val2:expr, $($tt:tt)+) => {
+        if ::std::cfg!(debug_assertions) {
+            $crate::assert!($val1 != $val2, $($tt)+);
+        }
+    };
+}
+
+/// Better assert_matches! that outputs a message through log since panics don't really work with the JNI
+#[macro_export]
+macro_rules! debug_assert_matches {
+    ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
+        if ::std::cfg!(debug_assertions) {
+            $crate::assert!(matches!($expression, $pattern $(if $guard)?));
+        }
+    };
+    ($expression:expr, $pattern:pat $(if $guard:expr)?, $($tt:tt)+) => {
+        if ::std::cfg!(debug_assertions) {
+            $crate::assert!(matches!($expression, $pattern $(if $guard)?), $($tt)+);
+        }
+    };
+}

@@ -1,9 +1,11 @@
 //! Implementations of [`hardware::Device`](crate::hardware::Device).
 
-use std::ops::RangeInclusive;
+use std::ops::RangeBounds;
 
 use jni::{JavaVM, objects::JObject, refs::Global, signature::RuntimeMethodSignature};
 use log::trace;
+
+use crate::{debug_assert, debug_assert_ne};
 
 use crate::{
     call_method, call_method_device, hardware::{
@@ -44,17 +46,20 @@ macro_rules! device {
                 pub fn is_null(&self) -> bool {
                     self.inner.is_none()
                 }
+                #[allow(clippy::panic)]
                 fn vm(&self) -> &JavaVM {
-                    if self.is_null() {
+                    if let Some(inner) = self.inner.as_ref() {
+                        &inner.vm
+                    } else {
                         panic!("Attempted to use null device");
                     }
-                    &self.inner.as_ref().unwrap().vm
                 }
                 fn object(&self) -> &Global<JObject<'static>> {
-                    if self.is_null() {
+                    if let Some(inner) = self.inner.as_ref() {
+                        &inner.object
+                    } else {
                         panic!("Attempted to use null device");
                     }
-                    &self.inner.as_ref().unwrap().object
                 }
             }
 
@@ -81,6 +86,8 @@ macro_rules! device {
 }
 
 device!(
+    /// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.html.
+    /// 
     /// `DcMotor` provides access to full-featured motor functionality.
     DcMotor,
     JAVA_CLASS = "com.qualcomm.robotcore.hardware.DcMotor";
@@ -94,16 +101,15 @@ impl DcMotor {
         trace!("setting direction of DcMotor");
         self.vm()
             .attach_current_thread(|env| {
-                let obj = dir.into_jni_object(env);
+                let obj = dir.into_jni_object_dcmotor(env);
                 call_method!(
                     env env,
                     self.object(),
                     "setDirection",
-                    format!("(L{};)V", Direction::JNI_CLASS),
+                    format!("(L{};)V", Direction::DCMOTOR_JNI_CLASS),
                     [&obj]
-                )
-                .unwrap();
-                jni::errors::Result::Ok(()) // cannot return a reference
+                )?;
+                jni::errors::Result::Ok(())
             })
             .unwrap();
         trace!("set direction of DcMotor");
@@ -111,15 +117,15 @@ impl DcMotor {
 
     /// Returns the current logical direction in which this motor is operating.
     #[doc(alias = "getDirection")]
-    pub fn get_direction(&self) -> Direction {
+    pub fn direction(&self) -> Direction {
         let res = call_method_device!(
             obj self,
             self.object(),
             "getDirection",
-            format!("()L{};", Direction::JNI_CLASS),
+            format!("()L{};", Direction::DCMOTOR_JNI_CLASS),
             []
         );
-        Direction::from_jni_object(self.vm(), res)
+        Direction::from_jni_object_dcmotor(self.vm(), res)
     }
 
     /// Sets the power level of the motor, expressed as a fraction of the maximum possible power /
@@ -142,7 +148,7 @@ impl DcMotor {
     /// Returns the current configured power level of the motor.
     #[doc(alias = "getPower")]
     #[must_use]
-    pub fn get_power(&self) -> f64 {
+    pub fn power(&self) -> f64 {
         call_method_device!(double self, self.object(), "getPower", "()D",
             [])
     }
@@ -161,8 +167,7 @@ impl DcMotor {
                     "setZeroPowerBehavior",
                     format!("(L{};)V", ZeroPowerBehavior::JNI_CLASS),
                     [&obj]
-                )
-                .unwrap();
+                )?;
                 jni::errors::Result::Ok(()) // cannot return a reference
             })
             .unwrap();
@@ -170,7 +175,7 @@ impl DcMotor {
 
     /// Returns the current behavior of the motor were a power level of zero to be applied.
     #[doc(alias = "getZeroPowerBehavior")]
-    pub fn get_zero_power_behavior(&self) -> ZeroPowerBehavior {
+    pub fn zero_power_behavior(&self) -> ZeroPowerBehavior {
         let res = call_method_device!(
             obj self,
             self.object(),
@@ -198,7 +203,7 @@ impl DcMotor {
     /// Returns the current target encoder position for this motor.
     #[doc(alias = "getTargetPosition")]
     #[must_use]
-    pub fn get_target_position(&self) -> i32 {
+    pub fn target_position(&self) -> i32 {
         call_method_device!(int self, self.object(), "getTargetPosition", "()I",
             [])
     }
@@ -206,7 +211,7 @@ impl DcMotor {
     /// Returns true if the motor is currently advancing or retreating to a target position.
     #[doc(alias = "isBusy")]
     #[must_use]
-    pub fn is_busy(&self) -> bool {
+    pub fn busy(&self) -> bool {
         call_method_device!(bool self, self.object(), "isBusy", "()Z",
             [])
     }
@@ -216,7 +221,7 @@ impl DcMotor {
     /// and thus are not specified here.
     #[doc(alias = "getCurrentPosition")]
     #[must_use]
-    pub fn get_current_position(&self) -> i32 {
+    pub fn current_position(&self) -> i32 {
         call_method_device!(int self, self.object(), "getCurrentPosition", "()I",
             [])
     }
@@ -233,8 +238,7 @@ impl DcMotor {
                     "setMode",
                     format!("(L{};)V", RunMode::JNI_CLASS),
                     [&obj]
-                )
-                .unwrap();
+                )?;
                 jni::errors::Result::Ok(()) // cannot return a reference
             })
             .unwrap();
@@ -242,7 +246,7 @@ impl DcMotor {
 
     /// Returns the current behavior of the motor were a power level of zero to be applied.
     #[doc(alias = "getMode")]
-    pub fn get_mode(&self) -> RunMode {
+    pub fn mode(&self) -> RunMode {
         let res = call_method_device!(
             obj self,
             self.object(),
@@ -255,6 +259,8 @@ impl DcMotor {
 }
 
 device!(
+    /// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/Servo.html.
+    /// 
     /// `Servo` provides access to servo hardware devices.
     Servo,
     JAVA_CLASS = "com.qualcomm.robotcore.hardware.Servo";
@@ -274,8 +280,7 @@ impl Servo {
                     "setDirection",
                     format!("(L{};)V", Direction::SERVO_JNI_CLASS),
                     [&obj]
-                )
-                .unwrap();
+                )?;
                 jni::errors::Result::Ok(()) // cannot return a reference
             })
             .unwrap();
@@ -283,7 +288,7 @@ impl Servo {
 
     /// Returns the current logical direction in which this servo is set as operating.
     #[doc(alias = "getDirection")]
-    pub fn get_direction(&self) -> Direction {
+    pub fn direction(&self) -> Direction {
         let res = call_method_device!(
             obj self,
             self.object(),
@@ -311,7 +316,7 @@ impl Servo {
     /// electrical mechanism is, generally, available.
     #[doc(alias = "getPosition")]
     #[must_use]
-    pub fn get_target_position(&self) -> f64 {
+    pub fn target_position(&self) -> f64 {
         call_method_device!(double self, self.object(), "getPosition", "()D",
             [])
     }
@@ -322,25 +327,38 @@ impl Servo {
     /// it is manipulating (as is often the case) but you don't want to have to manually scale
     /// and adjust the input to [`Servo::set_target_position`] each time.
     ///
-    /// For example, if `set_range(0.2, 0.8)` is set then servo positions will be scaled to fit in
+    /// For example, if `set_range(0.2..0.8)` is set then servo positions will be scaled to fit in
     /// that range. `set_target_position(0.0)` scales to 0.2, `set_target_position(1.0)` scales
-    /// to 0.8, `set_target_position(0.5)` scales to 0.5, `set_target_position(0.25)` scales to
-    /// 0.35, and `set_target_position(0.75)` scales to 0.65.
+    /// to 0.8 (notably exclusive bounds are essentially treated as inclusive here!),
+    /// `set_target_position(0.5)` scales to 0.5, `set_target_position(0.25)` scales to 0.35, and
+    /// `set_target_position(0.75)` scales to 0.65.
     ///
     /// Note the parameters passed here are relative to the underlying full range of motion of the
-    /// servo, not its currently scaled range, if any. Thus, `set_range(0.0, 1.0)` will reset
-    /// the servo to its full range of movement.
+    /// servo, not its currently scaled range, if any. Thus, `set_range(0.0..1.0)` will reset
+    /// the servo to its full range of movement. In Rust, `set_range(..)` will achieve the same effect.
     #[doc(alias = "scaleRange")]
-    pub fn set_range(&self, range: RangeInclusive<f64>) {
+    pub fn set_range(&self, range: impl RangeBounds<f64>) {
+        let start = match range.start_bound().cloned() {
+            std::ops::Bound::Included(v) => v,
+            std::ops::Bound::Excluded(v) => v, // really terrible practice here
+            std::ops::Bound::Unbounded => 0.0,
+        };
+        let end = match range.end_bound().cloned() {
+            std::ops::Bound::Included(v) => v,
+            std::ops::Bound::Excluded(v) => v, // really terrible practice here
+            std::ops::Bound::Unbounded => 1.0,
+        };
         debug_assert!(
-            *range.start() >= 0.0 && *range.end() <= 1.0,
+            start >= 0.0 && end <= 1.0,
             "servo range should not be larger than 0.0, 1.0"
         );
-        call_method_device!(void self, self.object(), "scaleRange", "(DD)V", [*range.start(), *range.end()]);
+        call_method_device!(void self, self.object(), "scaleRange", "(DD)V", [start, end]);
     }
 }
 
 device!(
+    /// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/CRServo.html.
+    /// 
     /// `CRServo` is supported by continuous rotation servos
     CRServo,
     JAVA_CLASS = "com.qualcomm.robotcore.hardware.CRServo";
@@ -353,15 +371,14 @@ impl CRServo {
     pub fn set_direction(&self, dir: Direction) {
         self.vm()
             .attach_current_thread(|env| {
-                let obj = dir.into_jni_object(env);
+                let obj = dir.into_jni_object_servo(env);
                 call_method!(
                     env env,
                     self.object(),
                     "setDirection",
-                    format!("(L{};)V", Direction::JNI_CLASS),
+                    format!("(L{};)V", Direction::SERVO_JNI_CLASS),
                     [&obj]
-                )
-                .unwrap();
+                )?;
                 jni::errors::Result::Ok(()) // cannot return a reference
             })
             .unwrap();
@@ -369,15 +386,15 @@ impl CRServo {
 
     /// Returns the current logical direction in which this motor is set as operating.
     #[doc(alias = "getDirection")]
-    pub fn get_direction(&self) -> Direction {
+    pub fn direction(&self) -> Direction {
         let res = call_method_device!(
             obj self,
             self.object(),
             "getDirection",
-            format!("()L{};", Direction::JNI_CLASS),
+            format!("()L{};", Direction::SERVO_JNI_CLASS),
             []
         );
-        Direction::from_jni_object(&self.vm(), res)
+        Direction::from_jni_object_servo(&self.vm(), res)
     }
 
     /// Sets the power level of the motor, expressed as a fraction of the maximum possible power /
@@ -396,13 +413,15 @@ impl CRServo {
     /// Returns the current configured power level of the motor.
     #[doc(alias = "getPower")]
     #[must_use]
-    pub fn get_power(&self) -> f64 {
+    pub fn power(&self) -> f64 {
         call_method_device!(double self, self.object(), "getPower", "()D",
             [])
     }
 }
 
 device!(
+    /// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/IMU.html.
+    /// 
     /// An Inertial Measurement Unit that provides robot-centric orientation and angular velocity.
     ///
     /// All measurements are in the Robot Coordinate System. In the Robot Coordinate System, the X axis
@@ -464,7 +483,7 @@ impl IMU {
     }
     /// Get the [`YawPitchRollAngles`] of the robot.
     #[doc(alias = "getRobotYawPitchRollAngles")]
-    pub fn get_angles(&self) -> YawPitchRollAngles {
+    pub fn angles(&self) -> YawPitchRollAngles {
         let res = call_method_device!(
             obj self,
             self.object(),
@@ -489,12 +508,10 @@ impl IMU {
                         RuntimeMethodSignature::from_str(format!(
                             "(L{};)Lcom/qualcomm/robotcore/hardware/IMU$Parameters;",
                             Rev9AxisImuOrientationOnRobot::JNI_CLASS
-                        ))
-                        .unwrap()
+                        ))?
                         .method_signature(),
                         &[(&orientation).into()],
-                    )
-                    .unwrap();
+                    )?;
 
                 call_method!(
                     env env,
@@ -502,15 +519,14 @@ impl IMU {
                     "initialize",
                     "(Lcom/qualcomm/robotcore/hardware/IMU$Parameters;)Z",
                     [&params]
-                )
-                .unwrap()
+                )?
                 .z()
             })
             .unwrap()
     }
     /// Get the [`AngularVelocity`] of the robot.
     #[doc(alias = "getRobotAngularVelocity")]
-    pub fn get_velocity(&self) -> AngularVelocity {
+    pub fn velocity(&self) -> AngularVelocity {
         let res = call_method_device!(
             obj self,
             self.object(),

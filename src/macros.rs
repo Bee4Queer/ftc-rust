@@ -12,32 +12,32 @@ macro_rules! call_method_device {
 #[macro_export]
 macro_rules! call_method {
     (void $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
-        $self.vm.attach_current_thread(|env| {$crate::call_method!(env env, $obj, $name, $sig, $args).unwrap(); Ok::<(), jni::errors::Error>(())}).unwrap();
+        $self.vm.attach_current_thread(|env| {$crate::call_method!(env env, $obj, $name, $sig, $args)?; Ok::<(), jni::errors::Error>(())}).unwrap();
     }};
     (obj $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
         $self.vm.attach_current_thread(|env| {
-            let object = $crate::call_method!(env env, $obj, $name, $sig, $args).unwrap().l().unwrap();
+            let object = $crate::call_method!(env env, $obj, $name, $sig, $args)?.l()?;
             $crate::new_global!(env, object)
         }).unwrap()
     }};
     (double $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
         $self.vm.attach_current_thread(|env| {
-            $crate::call_method!(env env, $obj, $name, $sig, $args).unwrap().d()
+            $crate::call_method!(env env, $obj, $name, $sig, $args)?.d()
         }).unwrap()
     }};
     (float $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
         $self.vm.attach_current_thread(|env| {
-            $crate::call_method!(env env, $obj, $name, $sig, $args).unwrap().f()
+            $crate::call_method!(env env, $obj, $name, $sig, $args)?.f()
         }).unwrap()
     }};
     (int $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
         $self.vm.attach_current_thread(|env| {
-            $crate::call_method!(env env, $obj, $name, $sig, $args).unwrap().i()
+            $crate::call_method!(env env, $obj, $name, $sig, $args)?.i()
         }).unwrap()
     }};
     (bool $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
         $self.vm.attach_current_thread(|env| {
-            $crate::call_method!(env env, $obj, $name, $sig, $args).unwrap().z()
+            $crate::call_method!(env env, $obj, $name, $sig, $args)?.z()
         }).unwrap()
     }};
     (env $env:expr, $obj:expr, $name:expr, $sig:expr, [] $(,)?) => {{

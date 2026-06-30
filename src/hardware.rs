@@ -18,7 +18,7 @@ mod devices;
 pub use devices::*;
 use log::{error, trace};
 
-use crate::{call_method, new_global, new_string};
+use crate::{call_method, new_global, new_string, debug_assert, unimplemented};
 
 /// A device that can be made from a java object.
 pub trait Device: Default {
@@ -57,8 +57,8 @@ impl Hardware {
         let object = self
             .vm
             .attach_current_thread(|env| {
-                let class = env.load_class(JNIString::new(T::JAVA_CLASS)).unwrap();
-                let jname = new_string!(env env, name.as_ref()).unwrap();
+                let class = env.load_class(JNIString::new(T::JAVA_CLASS))?;
+                let jname = new_string!(env env, name.as_ref())?;
                 trace!("arguments prepared");
 
                 let res = env.call_method(
@@ -71,7 +71,7 @@ impl Hardware {
                 trace!("called method");
 
                 match res {
-                    Ok(res) => new_global!(env, res.l().unwrap()),
+                    Ok(res) => new_global!(env, res.l()?),
                     Err(err) => {
                         error!("Got error {err} trying to get device `{}`!", name.as_ref());
                         Err(err)
@@ -118,8 +118,8 @@ macro_rules! enum_variant_into {
         $vis:vis body, $jni_class:literal,
         $java_class:literal,
         $($variant:ident),*
-        $(; PREFIX = $prefix:literal)?
-        $(; suffix = $suffix:literal)?
+        $(; PREFIX = $prefix:ident)?
+        $(; suffix = $suffix:ident)?
         $(,)?
         $(;)?
     } => {
@@ -129,7 +129,7 @@ macro_rules! enum_variant_into {
             /// Java class
             $vis const [< $($prefix)? JAVA_CLASS >]: &'static str = $java_class;
             /// conversion
-            $vis fn [<into_jni_object $($suffix)?>]<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
+            $vis fn [< into_jni_object $($suffix)? >]<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
                 let class = get_class(env, Self:: [< $($prefix)? JNI_CLASS >]);
                 env
                     .get_static_field(
@@ -145,17 +145,13 @@ macro_rules! enum_variant_into {
             }
 
             /// conversion
-            $vis fn [<from_jni_object $($suffix)?>](
+            $vis fn [< from_jni_object $($suffix)? >](
                 vm: &JavaVM,
                 obj: Global<JObject<'static>>,
             ) -> Self {
                 let res = vm.attach_current_thread(|env| call_method!(env env, obj, "ordinal", "()I", []).unwrap().i()).unwrap();
-                let mut items = vec![$(Self:: $variant),*];
-                let full_len = items.len();
-                match res {
-                    $(x if x == {items.pop(); (full_len - items.len()) as i32} => Self:: $variant),*,
-                    _ => unreachable!()
-                }
+                let items = vec![$(Self:: $variant),*];
+                items[res as usize]
             }
         }
     };
@@ -172,7 +168,7 @@ macro_rules! enum_variant_into {
     };
 }
 
-/// Convert this type into a JNI object.
+/// Convert this type to/from a JNI object.
 pub trait IntoJniObject {
     /// The JNI-formatted class name.
     const JNI_CLASS: &'static str;
@@ -185,6 +181,9 @@ pub trait IntoJniObject {
     fn from_jni_object(vm: &JavaVM, obj: Global<JObject<'static>>) -> Self;
 }
 
+
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotorSimple.Direction.html.
+/// 
 /// `DcMotor`s can be configured to internally reverse the values to which, e.g., their motor power
 /// is set. This makes it easy to have drive train motors on two sides of a robot: during
 /// initialization, one would be set at at forward, the other at reverse, and the difference between
@@ -201,76 +200,30 @@ pub enum Direction {
     Reverse,
 }
 
-enum_variant_into! {
-    Direction,
-    "com/qualcomm/robotcore/hardware/DcMotorSimple$Direction",
-    "com.qualcomm.robotcore.hardware.DcMotorSimple.Direction",
-    Forward,
-    Reverse,
-}
-
 impl Direction {
-    /// The JNI class for a servo direction.
-    pub const SERVO_JNI_CLASS: &'static str = "com/qualcomm/robotcore/hardware/Servo$Direction";
-    /// The Java class for a servo direction.
-    pub const SERVO_JAVA_CLASS: &'static str = "com.qualcomm.robotcore.hardware.Servo.Direction";
-    /// Convert this to a JNI object for a `Servo` as it for some reason uses a different type.
-    pub fn into_jni_object_servo<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
-        let class = get_class(env, Self::SERVO_JNI_CLASS);
-        env.get_static_field(
-            class,
-            JNIString::new(match self {
-                Self::Forward => "Forward".to_uppercase(),
-                Self::Reverse => "Reverse".to_uppercase(),
-            }),
-            RuntimeFieldSignature::from_str(Self::SERVO_JNI_CLASS)
-                .unwrap()
-                .field_signature(),
-        )
-        .unwrap()
-        .l()
-        .unwrap()
+    enum_variant_into! {
+        pub body,
+        "com/qualcomm/robotcore/hardware/DcMotorSimple$Direction",
+        "com.qualcomm.robotcore.hardware.DcMotorSimple.Direction",
+        Forward,
+        Reverse;
+        PREFIX = DCMOTOR_;
+        suffix = _dcmotor;
     }
-    /// Convert this from a JNI object for a `Servo` as it for some reason uses a different type.
-    pub fn from_jni_object_servo(vm: &JavaVM, obj: Global<JObject<'static>>) -> Self {
-        let res = vm
-            .attach_current_thread(|env| {
-                {
-                    let env: &mut crate::jni::Env = env;
-                    let obj = env.new_local_ref(&obj).unwrap();
-                    env.call_method(
-                        &obj,
-                        crate::jni::strings::JNIString::new("ordinal"),
-                        jni_sig!("()I"),
-                        &[],
-                    )
-                }
-                .unwrap()
-                .i()
-            })
-            .unwrap();
-        let mut items = vec![Self::Forward, Self::Reverse];
-        let full_len = items.len();
-        match res {
-            x if x == {
-                items.pop();
-                (full_len - items.len()) as i32
-            } =>
-            {
-                Self::Forward
-            }
-            x if x == {
-                items.pop();
-                (full_len - items.len()) as i32
-            } =>
-            {
-                Self::Reverse
-            }
-            _ => unreachable!(),
-        }
+
+    enum_variant_into! {
+        pub body,
+        "com/qualcomm/robotcore/hardware/Servo$Direction",
+        "com.qualcomm.robotcore.hardware.Servo.Direction",
+        Forward,
+        Reverse;
+        PREFIX = SERVO_;
+        suffix = _servo;
     }
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.ZeroPowerBehavior.html.
+/// 
 /// `ZeroPowerBehavior` provides an indication as to a motor's behavior when a power level of zero
 /// is applied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -297,6 +250,8 @@ enum_variant_into! {
     Float,
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.RunMode.html.
+/// 
 /// The run mode of a motor controls how the motor interprets its parameter settings passed through
 /// power- and encoder-related methods. Some of these modes internally use `PIDcontrol` to achieve
 /// their function, while others do not. Those that do are referred to as "PID modes".
@@ -337,6 +292,8 @@ enum_variant_into! {
     StopAndResetEncoder,
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/AngleUnit.html.
+/// 
 /// Angle units.
 #[allow(missing_docs, reason = "angle units don't need to be explained")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -398,11 +355,13 @@ impl AngleUnit {
         "org.firstinspires.ftc.robotcore.external.navigation.UnnormalizedAngleUnit",
         Degree,
         Radian;
-        PREFIX = "UNNORMALIZED_";
-        suffix = "_unnormalized";
+        PREFIX = UNNORMALIZED_;
+        suffix = _unnormalized;
     }
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/AngularVelocity.html.
+/// 
 /// Instances of `AngularVelocity` represent an instantaneous body-referenced 3D rotation rate.
 ///
 /// The instantaneous rate of change of an Orientation, which is what we are representing here, has
@@ -540,6 +499,8 @@ impl Display for AngularVelocity {
     }
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/YawPitchRollAngles.html.
+/// 
 /// A simplified view of the orientation of an object in 3D space.
 ///
 /// Yaw is side-to-side lateral rotation, where the object remains flat, but turns left and right.
@@ -618,7 +579,7 @@ impl YawPitchRollAngles {
     pub fn set_roll(&mut self, unit: AngleUnit, value: f64) {
         self.roll = unit.to_unit(self.unit, value);
     }
-    /// Ensures that the angles are within the range -180..=180.
+    /// Ensures that the angles are within the range -180..=180 degrees.
     #[must_use]
     pub fn validate(&self) -> bool {
         let range = -180f64..=180f64;
@@ -661,7 +622,7 @@ impl IntoJniObject for YawPitchRollAngles {
         .unwrap()
     }
     fn from_jni_object(vm: &JavaVM, obj: Global<JObject<'static>>) -> Self {
-        vm.attach_current_thread(|env| {
+        let out = vm.attach_current_thread(|env| {
             let unit = AngleUnit::Degree.into_jni_object(env);
 
             let yaw = call_method!(env env, obj, "getYaw", format!("(L{};)D", AngleUnit::JNI_CLASS), [&unit])
@@ -682,7 +643,11 @@ impl IntoJniObject for YawPitchRollAngles {
             jni::errors::Result::Ok(
                 YawPitchRollAngles { yaw, pitch, roll, acquisition_time, unit: AngleUnit::Degree }
             )
-        }).unwrap()
+        }).unwrap();
+
+        debug_assert!(out.validate());
+
+        out
     }
 }
 
@@ -703,6 +668,8 @@ impl Display for YawPitchRollAngles {
     }
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.LogoFacingDirection.html and https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.I2cPortFacingDirection.html.
+/// 
 /// The orientation of something on the robot.
 #[allow(missing_docs, reason = "orientations don't need to be explained")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -727,8 +694,8 @@ impl Orientation {
         Backward,
         Left,
         Right;
-        PREFIX = "LOGO_";
-        suffix = "_logo";
+        PREFIX = LOGO_;
+        suffix = _logo;
     }
     enum_variant_into! {
         pub body,
@@ -740,11 +707,13 @@ impl Orientation {
         Backward,
         Left,
         Right;
-        PREFIX = "I2C_";
-        suffix = "_i2c";
+        PREFIX = I2C_;
+        suffix = _i2c;
     }
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.html.
+/// 
 /// The orientation at which a given REV External IMU is mounted to a robot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[must_use]
@@ -759,6 +728,7 @@ impl Rev9AxisImuOrientationOnRobot {
     /// Validate this orientation.
     #[must_use]
     pub fn validate(&self) -> bool {
+        // code adapted from 
         match self.logo_dir {
             Orientation::Up | Orientation::Down => match self.i2c_dir {
                 Orientation::Up | Orientation::Down => false,
@@ -813,16 +783,24 @@ impl IntoJniObject for Rev9AxisImuOrientationOnRobot {
         )
         .unwrap()
     }
-    fn from_jni_object(_: &JavaVM, _: Global<JObject<'static>>) -> Self {
+    fn from_jni_object(_vm: &JavaVM, _obj: Global<JObject<'static>>) -> Self {
+        // What needs to be done to convert it is to extract quaternion of the IMU from the class
+        // that Rev9AxisImuOrientationOnRobot inherits from, RevImuOrientationOnRobot. (see
+        // https://github.com/OpenFTC/Extracted-RC). Then match on it or something to get the two
+        // orientations we need.
+
         unimplemented!(
-            "I'm honestly not sure if it's possible to convert a `Rev9AxisImuOrientationOnRobot` \
-             from Java. If you know either way, make a PR to {}:{}!",
+            "I don't want to implement converting a `Rev9AxisImuOrientationOnRobot` \
+             from Java. If you want to, make a PR to {}:{} in \
+             https://github.com/Bee4Queer/ftc-rust. There's info on what to do there.",
             file!(),
             line!()
-        )
+        );
     }
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/HardwareDevice.Manufacturer.html.
+/// 
 /// The manufacturer of a part.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[allow(missing_docs, reason = "manufacturer names")]
@@ -895,6 +873,8 @@ enum_variant_into! {
     GoBilda,
 }
 
+/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/HardwareDevice.html.
+/// 
 /// A hardware device.
 pub struct HardwareDevice {
     /// The environment.
@@ -906,9 +886,9 @@ pub struct HardwareDevice {
 impl Debug for HardwareDevice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HardwareDevice")
-            .field("manufacturer", &self.get_manufacturer())
-            .field("device_name", &self.get_device_name())
-            .field("connection_info", &self.get_connection_info())
+            .field("manufacturer", &self.manufacturer())
+            .field("device_name", &self.device_name())
+            .field("connection_info", &self.connection_info())
             .finish()
     }
 }
@@ -921,7 +901,7 @@ impl HardwareDevice {
 
     /// Returns an indication of the manufacturer of this device.
     #[doc(alias = "getManufacturer")]
-    pub fn get_manufacturer(&self) -> Manufacturer {
+    pub fn manufacturer(&self) -> Manufacturer {
         self.vm
             .attach_current_thread(|env| {
                 let res = call_method!(
@@ -930,13 +910,11 @@ impl HardwareDevice {
                     "getManufacturer",
                     format!("()L{};", Manufacturer::JNI_CLASS),
                     []
-                )
-                .unwrap()
-                .l()
-                .unwrap();
+                )?
+                .l()?;
                 jni::errors::Result::Ok(Manufacturer::from_jni_object(
                     &self.vm,
-                    new_global!(env, res).unwrap(),
+                    new_global!(env, res)?,
                 ))
             })
             .unwrap()
@@ -946,7 +924,7 @@ impl HardwareDevice {
     /// have configured the device in a robot configuration.
     #[must_use]
     #[doc(alias = "getDeviceName")]
-    pub fn get_device_name(&self) -> String {
+    pub fn device_name(&self) -> String {
         self.vm
             .attach_current_thread(|env| {
                 let res = call_method!(
@@ -956,14 +934,14 @@ impl HardwareDevice {
                     format!("()Ljava/lang/String;"),
                     []
                 )
-                .unwrap()
+                ?
                 .l()
-                .unwrap();
+                ?;
                 jni::errors::Result::Ok(
                     JString::cast_local(env, res)
-                        .unwrap()
+                        ?
                         .mutf8_chars(env)
-                        .unwrap()
+                        ?
                         .to_str()
                         .to_string(),
                 )
@@ -973,7 +951,7 @@ impl HardwareDevice {
     /// Get connection information about this device in a human readable format.
     #[must_use]
     #[doc(alias = "getConnectionInfo")]
-    pub fn get_connection_info(&self) -> String {
+    pub fn connection_info(&self) -> String {
         self.vm
             .attach_current_thread(|env| {
                 let res = call_method!(
@@ -983,14 +961,14 @@ impl HardwareDevice {
                     format!("()Ljava/lang/String;"),
                     []
                 )
-                .unwrap()
+                ?
                 .l()
-                .unwrap();
+                ?;
                 jni::errors::Result::Ok(
                     JString::cast_local(env, res)
-                        .unwrap()
+                        ?
                         .mutf8_chars(env)
-                        .unwrap()
+                        ?
                         .to_str()
                         .to_string(),
                 )
