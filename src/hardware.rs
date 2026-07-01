@@ -6,6 +6,7 @@ use std::{
     fmt::{Debug, Display},
 };
 
+use glam::{Quat, vec4};
 use jni::{
     Env, JavaVM, jni_sig,
     objects::{JClass, JObject, JString},
@@ -14,20 +15,38 @@ use jni::{
     strings::JNIString,
 };
 
+#[macro_use]
 mod devices;
 pub use devices::*;
+pub mod limelight;
 use log::{error, trace};
 
-use crate::{call_method, debug_assert, new_global, new_string, unimplemented};
+use crate::{call_method, debug_assert, get_field, new_global, new_string, unimplemented};
 
 /// A device that can be made from a java object.
 pub trait Device: Default {
     /// Create a new instance of this type from the java environment and the relevant object.
+    #[must_use]
     fn from_java(vm: JavaVM, object: Global<JObject<'static>>) -> Self;
     /// The Java-formatted class name. Unlike other JNI things, this uses dots.
     const JAVA_CLASS: &'static str;
     /// The JNI-formatted class name. Uses forward slashes instead of dots.
     const JNI_CLASS: &'static str;
+
+    /// Returns the URL to the javadoc of this `Device`. Mostly useful for debugging purposes.
+    #[must_use]
+    fn javadoc() -> String {
+        let segments = Self::JNI_CLASS.split('/').collect::<Vec<_>>();
+        format!(
+            "https://javadoc.io/doc/org.firstinspires.ftc/{}/latest/{}.html",
+            match &segments[0..3] {
+                ["com", "qualcomm", "hardware"] => "Hardware",
+                ["org", "firstinspires", "ftc"] => "RobotCore",
+                _ => unimplemented!(),
+            },
+            Self::JNI_CLASS.replace('$', ".")
+        )
+    }
 }
 
 /// A wrapper for accessing hardware-related methods.
@@ -174,10 +193,61 @@ pub trait IntoJniObject {
     /// The Java-formatted class name.
     const JAVA_CLASS: &'static str;
 
+    /// Returns the URL to the javadoc of this JNI object. Mostly useful for debugging purposes.
+    #[must_use]
+    fn javadoc() -> String {
+        let segments = Self::JNI_CLASS.split('/').collect::<Vec<_>>();
+        format!(
+            "https://javadoc.io/doc/org.firstinspires.ftc/{}/latest/{}.html",
+            match &segments[0..3] {
+                ["com", "qualcomm", "hardware"] => "Hardware",
+                ["org", "firstinspires", "ftc"] => "RobotCore",
+                _ => unimplemented!(),
+            },
+            Self::JNI_CLASS.replace('$', ".")
+        )
+    }
+
     /// Convert this type into a `JObject`.
+    #[must_use]
     fn into_jni_object<'local>(self, env: &mut Env<'local>) -> JObject<'local>;
     /// Convert a `JObject` into this type.
+    #[must_use]
     fn from_jni_object(vm: &JavaVM, obj: Global<JObject<'static>>) -> Self;
+}
+
+impl IntoJniObject for Quat {
+    const JNI_CLASS: &'static str =
+        "org/firstinspires/ftc/robotcore/external/navigation/Quaternion";
+    const JAVA_CLASS: &'static str =
+        "org.firstinspires.ftc.robotcore.external.navigation.Quaternion";
+
+    fn from_jni_object(vm: &JavaVM, obj: Global<JObject<'static>>) -> Self {
+        let (x, y, z, w) = vm
+            .attach_current_thread(|env| {
+                jni::errors::Result::Ok((
+                    get_field!(float env, &obj, "x"),
+                    get_field!(float env, &obj, "y"),
+                    get_field!(float env, &obj, "z"),
+                    get_field!(float env, &obj, "w"),
+                ))
+            })
+            .unwrap();
+        Self::from_vec4(vec4(x, y, z, w))
+    }
+    fn into_jni_object<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
+        let class = env.find_class(JNIString::new(Self::JNI_CLASS)).unwrap();
+        env.new_object(
+            class,
+            jni::signature::RuntimeMethodSignature::from_str(
+                "(FFFFJ)Lorg.firstinspires.ftc.robotcore.external.navigation.Quaternion;",
+            )
+            .unwrap()
+            .method_signature(),
+            &[self.x.into(), self.y.into(), self.z.into(), 0i64.into()],
+        )
+        .unwrap()
+    }
 }
 
 /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotorSimple.Direction.html>.

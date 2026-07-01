@@ -2,7 +2,7 @@
 
 use std::ops::RangeBounds;
 
-use jni::{JavaVM, objects::JObject, refs::Global, signature::RuntimeMethodSignature};
+use jni::signature::RuntimeMethodSignature;
 use log::trace;
 
 use crate::{debug_assert, debug_assert_ne};
@@ -16,19 +16,21 @@ use crate::{
 };
 
 /// Easily define a basic device.
+#[macro_export]
 macro_rules! device {
-    ($(#[$attr:meta])* $name:ident, JAVA_CLASS = $java_class:literal $(;)? $(,)? JNI_CLASS = $jni_class:literal $(;)? $(,)?) => {
+    {$(#[$attr:meta])* $name:ident, JAVA_CLASS = $java_class:literal $(;)? $(,)? JNI_CLASS = $jni_class:literal $(;)? $(,)?} => {
         paste::paste! {
             $(#[$attr])*
-            pub struct [< $name Inner >] {
+            #[doc(hidden)]
+            struct [< $name Inner >] {
                 /// The environment.
-                vm: JavaVM,
+                vm: $crate::jni::JavaVM,
                 /// The actual object.
-                object: Global<JObject<'static>>,
+                object: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>,
             }
 
-            impl std::fmt::Debug for [< $name Inner >] {
-                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            impl ::std::fmt::Debug for [< $name Inner >] {
+                fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                     f.write_str(concat!("(opaque ", stringify!($name), " object, wraps ", $java_class, ")"))
                 }
             }
@@ -44,18 +46,20 @@ macro_rules! device {
 
             impl $name {
                 /// Returns whether this device is a null pointer.
+                #[must_use]
                 pub fn is_null(&self) -> bool {
                     self.inner.is_none()
                 }
-                #[allow(clippy::panic)]
-                fn vm(&self) -> &JavaVM {
+                #[must_use]
+                fn vm(&self) -> &$crate::jni::JavaVM {
                     if let Some(inner) = self.inner.as_ref() {
                         &inner.vm
                     } else {
                         panic!("Attempted to use null device");
                     }
                 }
-                fn object(&self) -> &Global<JObject<'static>> {
+                #[must_use]
+                fn object(&self) -> &$crate::jni::refs::Global<$crate::jni::objects::JObject<'static>> {
                     if let Some(inner) = self.inner.as_ref() {
                         &inner.object
                     } else {
@@ -64,8 +68,8 @@ macro_rules! device {
                 }
             }
 
-            impl std::fmt::Debug for $name {
-                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            impl ::std::fmt::Debug for $name {
+                fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                     f.write_str(concat!("(opaque ", stringify!($name), " object, wraps ", $java_class, ")"))
                 }
             }
@@ -73,7 +77,7 @@ macro_rules! device {
             impl $crate::hardware::Device for $name {
                 const JAVA_CLASS: &'static str = $java_class;
                 const JNI_CLASS: &'static str = $jni_class;
-                fn from_java(vm: JavaVM, object: Global<JObject<'static>>) -> Self {
+                fn from_java(vm: $crate::jni::JavaVM, object: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>) -> Self {
                     Self {
                         inner: Some([< $name Inner >] {
                             vm,
@@ -341,11 +345,11 @@ impl Servo {
     #[doc(alias = "scaleRange")]
     pub fn set_range(&self, range: impl RangeBounds<f64>) {
         let start = match range.start_bound().cloned() {
-            std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => v, // really terrible practice here
+            std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => v, /* really terrible practice here */
             std::ops::Bound::Unbounded => 0.0,
         };
         let end = match range.end_bound().cloned() {
-            std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => v, // really terrible practice here
+            std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => v, /* really terrible practice here */
             std::ops::Bound::Unbounded => 1.0,
         };
         debug_assert!(
