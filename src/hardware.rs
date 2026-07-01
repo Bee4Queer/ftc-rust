@@ -18,7 +18,7 @@ mod devices;
 pub use devices::*;
 use log::{error, trace};
 
-use crate::{call_method, new_global, new_string, debug_assert, unimplemented};
+use crate::{call_method, debug_assert, new_global, new_string, unimplemented};
 
 /// A device that can be made from a java object.
 pub trait Device: Default {
@@ -78,7 +78,6 @@ impl Hardware {
                     }
                 }
             })
-            .map_err(|err| panic!("{err}")) // panic payloads are weird
             .unwrap();
         trace!("got device");
 
@@ -181,9 +180,8 @@ pub trait IntoJniObject {
     fn from_jni_object(vm: &JavaVM, obj: Global<JObject<'static>>) -> Self;
 }
 
-
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotorSimple.Direction.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotorSimple.Direction.html>.
+///
 /// `DcMotor`s can be configured to internally reverse the values to which, e.g., their motor power
 /// is set. This makes it easy to have drive train motors on two sides of a robot: during
 /// initialization, one would be set at at forward, the other at reverse, and the difference between
@@ -222,8 +220,8 @@ impl Direction {
     }
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.ZeroPowerBehavior.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.ZeroPowerBehavior.html>.
+///
 /// `ZeroPowerBehavior` provides an indication as to a motor's behavior when a power level of zero
 /// is applied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -250,8 +248,8 @@ enum_variant_into! {
     Float,
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.RunMode.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.RunMode.html>.
+///
 /// The run mode of a motor controls how the motor interprets its parameter settings passed through
 /// power- and encoder-related methods. Some of these modes internally use `PIDcontrol` to achieve
 /// their function, while others do not. Those that do are referred to as "PID modes".
@@ -292,8 +290,8 @@ enum_variant_into! {
     StopAndResetEncoder,
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/AngleUnit.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/AngleUnit.html>.
+///
 /// Angle units.
 #[allow(missing_docs, reason = "angle units don't need to be explained")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -360,8 +358,8 @@ impl AngleUnit {
     }
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/AngularVelocity.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/AngularVelocity.html>.
+///
 /// Instances of `AngularVelocity` represent an instantaneous body-referenced 3D rotation rate.
 ///
 /// The instantaneous rate of change of an Orientation, which is what we are representing here, has
@@ -499,8 +497,8 @@ impl Display for AngularVelocity {
     }
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/YawPitchRollAngles.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/YawPitchRollAngles.html>.
+///
 /// A simplified view of the orientation of an object in 3D space.
 ///
 /// Yaw is side-to-side lateral rotation, where the object remains flat, but turns left and right.
@@ -668,8 +666,8 @@ impl Display for YawPitchRollAngles {
     }
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.LogoFacingDirection.html and https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.I2cPortFacingDirection.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.LogoFacingDirection.html> and <https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.I2cPortFacingDirection.html>.
+///
 /// The orientation of something on the robot.
 #[allow(missing_docs, reason = "orientations don't need to be explained")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -712,8 +710,8 @@ impl Orientation {
     }
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/rev/Rev9AxisImuOrientationOnRobot.html>.
+///
 /// The orientation at which a given REV External IMU is mounted to a robot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[must_use]
@@ -728,7 +726,7 @@ impl Rev9AxisImuOrientationOnRobot {
     /// Validate this orientation.
     #[must_use]
     pub fn validate(&self) -> bool {
-        // code adapted from 
+        // code adapted from
         match self.logo_dir {
             Orientation::Up | Orientation::Down => match self.i2c_dir {
                 Orientation::Up | Orientation::Down => false,
@@ -799,8 +797,8 @@ impl IntoJniObject for Rev9AxisImuOrientationOnRobot {
     }
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/HardwareDevice.Manufacturer.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/HardwareDevice.Manufacturer.html>.
+///
 /// The manufacturer of a part.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[allow(missing_docs, reason = "manufacturer names")]
@@ -873,8 +871,8 @@ enum_variant_into! {
     GoBilda,
 }
 
-/// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/HardwareDevice.html.
-/// 
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/HardwareDevice.html>.
+///
 /// A hardware device.
 pub struct HardwareDevice {
     /// The environment.
@@ -933,15 +931,11 @@ impl HardwareDevice {
                     "getDeviceName",
                     format!("()Ljava/lang/String;"),
                     []
-                )
-                ?
-                .l()
-                ?;
+                )?
+                .l()?;
                 jni::errors::Result::Ok(
-                    JString::cast_local(env, res)
-                        ?
-                        .mutf8_chars(env)
-                        ?
+                    JString::cast_local(env, res)?
+                        .mutf8_chars(env)?
                         .to_str()
                         .to_string(),
                 )
@@ -960,15 +954,11 @@ impl HardwareDevice {
                     "getConnectionInfo",
                     format!("()Ljava/lang/String;"),
                     []
-                )
-                ?
-                .l()
-                ?;
+                )?
+                .l()?;
                 jni::errors::Result::Ok(
-                    JString::cast_local(env, res)
-                        ?
-                        .mutf8_chars(env)
-                        ?
+                    JString::cast_local(env, res)?
+                        .mutf8_chars(env)?
                         .to_str()
                         .to_string(),
                 )

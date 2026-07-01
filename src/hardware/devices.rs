@@ -8,7 +8,8 @@ use log::trace;
 use crate::{debug_assert, debug_assert_ne};
 
 use crate::{
-    call_method, call_method_device, hardware::{
+    call_method, call_method_device,
+    hardware::{
         AngularVelocity, Direction, IntoJniObject as _, Rev9AxisImuOrientationOnRobot, RunMode,
         YawPitchRollAngles, ZeroPowerBehavior, get_class,
     },
@@ -33,7 +34,7 @@ macro_rules! device {
             }
 
             $(#[$attr])*
-            /// 
+            ///
             /// Default is essentially a null pointer and will panic upon attempted use.
             #[derive(Default)]
             #[repr(transparent)]
@@ -86,8 +87,8 @@ macro_rules! device {
 }
 
 device!(
-    /// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.html.
-    /// 
+    /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.html>.
+    ///
     /// `DcMotor` provides access to full-featured motor functionality.
     DcMotor,
     JAVA_CLASS = "com.qualcomm.robotcore.hardware.DcMotor";
@@ -183,7 +184,7 @@ impl DcMotor {
             format!("()L{};", ZeroPowerBehavior::JNI_CLASS),
             []
         );
-        ZeroPowerBehavior::from_jni_object(&self.vm(), res)
+        ZeroPowerBehavior::from_jni_object(self.vm(), res)
     }
 
     /// Sets the desired encoder target position to which the motor should advance or retreat and
@@ -254,13 +255,13 @@ impl DcMotor {
             format!("()L{};", RunMode::JNI_CLASS),
             []
         );
-        RunMode::from_jni_object(&self.vm(), res)
+        RunMode::from_jni_object(self.vm(), res)
     }
 }
 
 device!(
-    /// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/Servo.html.
-    /// 
+    /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/Servo.html>.
+    ///
     /// `Servo` provides access to servo hardware devices.
     Servo,
     JAVA_CLASS = "com.qualcomm.robotcore.hardware.Servo";
@@ -296,7 +297,7 @@ impl Servo {
             format!("()L{};", Direction::SERVO_JNI_CLASS),
             []
         );
-        Direction::from_jni_object_servo(&self.vm(), res)
+        Direction::from_jni_object_servo(self.vm(), res)
     }
 
     /// Sets the current position of the servo, expressed as a fraction of its available range. If
@@ -335,17 +336,16 @@ impl Servo {
     ///
     /// Note the parameters passed here are relative to the underlying full range of motion of the
     /// servo, not its currently scaled range, if any. Thus, `set_range(0.0..1.0)` will reset
-    /// the servo to its full range of movement. In Rust, `set_range(..)` will achieve the same effect.
+    /// the servo to its full range of movement. In Rust, `set_range(..)` will achieve the same
+    /// effect.
     #[doc(alias = "scaleRange")]
     pub fn set_range(&self, range: impl RangeBounds<f64>) {
         let start = match range.start_bound().cloned() {
-            std::ops::Bound::Included(v) => v,
-            std::ops::Bound::Excluded(v) => v, // really terrible practice here
+            std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => v, // really terrible practice here
             std::ops::Bound::Unbounded => 0.0,
         };
         let end = match range.end_bound().cloned() {
-            std::ops::Bound::Included(v) => v,
-            std::ops::Bound::Excluded(v) => v, // really terrible practice here
+            std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => v, // really terrible practice here
             std::ops::Bound::Unbounded => 1.0,
         };
         debug_assert!(
@@ -357,8 +357,8 @@ impl Servo {
 }
 
 device!(
-    /// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/CRServo.html.
-    /// 
+    /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/CRServo.html>.
+    ///
     /// `CRServo` is supported by continuous rotation servos
     CRServo,
     JAVA_CLASS = "com.qualcomm.robotcore.hardware.CRServo";
@@ -394,7 +394,7 @@ impl CRServo {
             format!("()L{};", Direction::SERVO_JNI_CLASS),
             []
         );
-        Direction::from_jni_object_servo(&self.vm(), res)
+        Direction::from_jni_object_servo(self.vm(), res)
     }
 
     /// Sets the power level of the motor, expressed as a fraction of the maximum possible power /
@@ -420,8 +420,8 @@ impl CRServo {
 }
 
 device!(
-    /// Javadoc available at https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/IMU.html.
-    /// 
+    /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/IMU.html>.
+    ///
     /// An Inertial Measurement Unit that provides robot-centric orientation and angular velocity.
     ///
     /// All measurements are in the Robot Coordinate System. In the Robot Coordinate System, the X axis
@@ -491,7 +491,7 @@ impl IMU {
             format!("()L{};", YawPitchRollAngles::JNI_CLASS),
             []
         );
-        YawPitchRollAngles::from_jni_object(&self.vm(), res)
+        YawPitchRollAngles::from_jni_object(self.vm(), res)
     }
     /// Initializes the IMU with non-default settings.
     #[doc(alias = "initialize")]
@@ -502,16 +502,15 @@ impl IMU {
                 let orientation = orientation.into_jni_object(env);
                 let class = get_class(env, "com/qualcomm/robotcore/hardware/IMU$Parameters");
 
-                let params = env
-                    .new_object(
-                        class,
-                        RuntimeMethodSignature::from_str(format!(
-                            "(L{};)Lcom/qualcomm/robotcore/hardware/IMU$Parameters;",
-                            Rev9AxisImuOrientationOnRobot::JNI_CLASS
-                        ))?
-                        .method_signature(),
-                        &[(&orientation).into()],
-                    )?;
+                let params = env.new_object(
+                    class,
+                    RuntimeMethodSignature::from_str(format!(
+                        "(L{};)Lcom/qualcomm/robotcore/hardware/IMU$Parameters;",
+                        Rev9AxisImuOrientationOnRobot::JNI_CLASS
+                    ))?
+                    .method_signature(),
+                    &[(&orientation).into()],
+                )?;
 
                 call_method!(
                     env env,
@@ -534,6 +533,6 @@ impl IMU {
             format!("()L{};", AngularVelocity::JNI_CLASS),
             []
         );
-        AngularVelocity::from_jni_object(&self.vm(), res)
+        AngularVelocity::from_jni_object(self.vm(), res)
     }
 }

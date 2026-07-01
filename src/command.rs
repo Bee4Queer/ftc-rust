@@ -1,7 +1,12 @@
 //! A command system, similar to `FTCLib`'s.
 
 use std::{
-    collections::VecDeque, convert::Infallible, fmt::Debug, sync::{Arc, Condvar, LazyLock, Mutex, RwLock, RwLockReadGuard, atomic::AtomicUsize},
+    collections::VecDeque,
+    convert::Infallible,
+    fmt::Debug,
+    sync::{Arc, Condvar, LazyLock, Mutex, RwLock, RwLockReadGuard, atomic::AtomicUsize},
+    thread::JoinHandle,
+    time::Duration,
 };
 
 use crate::FtcContext;
@@ -13,6 +18,7 @@ pub(crate) static SCHEDULER: LazyLock<RwLock<CommandScheduler>> = LazyLock::new(
         empty: Arc::new(Condvar::new()),
         empty_mutex: Arc::new(Mutex::new(false)),
         queue_len: Arc::new(AtomicUsize::new(0)),
+        runner_thread: None,
     })
 });
 
@@ -39,9 +45,15 @@ enum CommandState {
 pub struct CommandScheduler {
     /// The commands that will begin executing in the next round.
     to_add: Arc<Mutex<Vec<Box<dyn Command>>>>,
+    /// Current length of the queue for the current round.
     queue_len: Arc<AtomicUsize>,
+    /// Condvar for the queue being empty.
     empty: Arc<Condvar>,
+    /// Mutex used with the empty condvar.
     empty_mutex: Arc<Mutex<bool>>,
+    /// The runner thread.
+    #[allow(clippy::type_complexity)]
+    runner_thread: Option<(JoinHandle<()>, Arc<Condvar>, Arc<Mutex<bool>>)>,
 }
 
 impl Debug for CommandScheduler {
@@ -74,6 +86,20 @@ impl CommandScheduler {
             }
         }
     }
+    /// Stop the scheduler. Will kill any active commands.
+    pub(crate) fn stop(&mut self) {
+        if let Some((join_handle, kill, kill_mutex)) = self.runner_thread.take() {
+            *kill_mutex.lock().unwrap() = true;
+            kill.notify_all();
+
+            let _ = join_handle.join();
+            self.queue_len
+                .store(0usize, std::sync::atomic::Ordering::Release);
+            *self.empty_mutex.lock().unwrap() = true;
+            self.empty.notify_all();
+            *self.empty_mutex.lock().unwrap() = false;
+        }
+    }
     /// Run this scheduler.
     pub(crate) fn run(&mut self, ctx: FtcContext) {
         let commands = Mutex::new(Vec::new());
@@ -81,61 +107,90 @@ impl CommandScheduler {
         let empty = self.empty.clone();
         let empty_mutex = self.empty_mutex.clone();
         let queue_len = self.queue_len.clone();
-        std::thread::spawn(move || {
-            loop {
-                let mut commands_locked = commands.lock().unwrap();
-                let to_add = to_add.lock().unwrap().drain(..).collect::<Vec<_>>();
-                for command in to_add {
-                    commands_locked.push((command, CommandState::Initializing));
-                }
-                queue_len.store(commands_locked.len(), std::sync::atomic::Ordering::Release);
-                while !commands_locked.is_empty() {
-                    queue_len.store(commands_locked.len(), std::sync::atomic::Ordering::Release);
-                    let to_remove = Arc::new(Mutex::new(Vec::with_capacity(commands_locked.len())));
-                    std::thread::scope(|s| {
-                        for (i, (cmd, state)) in commands_locked
-                            .iter_mut()
-                            .enumerate()
-                        {
-                            let ctx = ctx.clone();
-                            let to_remove = to_remove.clone();
-                            s.spawn(move || {
-                                match *state {
-                                    CommandState::Finished => {
-                                        cmd.end(&ctx);
-                                        to_remove.lock().unwrap().push(i);
-                                    }
-                                    CommandState::Initializing => {
-                                        cmd.init(&ctx);
-                                        *state = CommandState::Executing;
-                                    }
-                                    CommandState::Executing => {
-                                        if cmd.try_run(&ctx) {
-                                            cmd.execute(&ctx);
-                                        }
-                                    }
-                                }
-                                if *state != CommandState::Finished && cmd.is_finished(&ctx) {
-                                    *state = CommandState::Finished;
-                                }
-                            });
-                        }
-                    });
-                    let mut to_remove = to_remove.lock().unwrap().clone();
-                    to_remove.sort();
+        let (kill, kill_mutex) = (Arc::new(Condvar::new()), Arc::new(Mutex::new(false)));
+        let (kill_runner, kill_mutex_runner) = (kill.clone(), kill_mutex.clone());
 
-                    let mut offset = 0usize;
-                    for ele in to_remove {
-                        commands_locked.remove(ele - offset);
-                        offset += 1;
+        self.runner_thread = Some((
+            std::thread::spawn(move || {
+                loop {
+                    if *kill_runner
+                        .wait_timeout(kill_mutex_runner.lock().unwrap(), Duration::from_millis(20))
+                        .unwrap()
+                        .0
+                    {
+                        return;
                     }
+
+                    let mut commands_locked = commands.lock().unwrap();
+                    let to_add = to_add.lock().unwrap().drain(..).collect::<Vec<_>>();
+                    for command in to_add {
+                        commands_locked.push((command, CommandState::Initializing));
+                    }
+                    queue_len.store(commands_locked.len(), std::sync::atomic::Ordering::Release);
+                    while !commands_locked.is_empty() {
+                        if *kill_runner
+                            .wait_timeout(
+                                kill_mutex_runner.lock().unwrap(),
+                                Duration::from_millis(20),
+                            )
+                            .unwrap()
+                            .0
+                        {
+                            return;
+                        }
+
+                        queue_len
+                            .store(commands_locked.len(), std::sync::atomic::Ordering::Release);
+                        let to_remove =
+                            Arc::new(Mutex::new(Vec::with_capacity(commands_locked.len())));
+                        std::thread::scope(|s| {
+                            for (i, (cmd, state)) in commands_locked.iter_mut().enumerate() {
+                                let ctx = ctx.clone();
+                                let to_remove = to_remove.clone();
+                                s.spawn(move || {
+                                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                                        || {
+                                            match *state {
+                                                CommandState::Finished => {
+                                                    cmd.end(&ctx);
+                                                    to_remove.lock().unwrap().push(i);
+                                                }
+                                                CommandState::Initializing => {
+                                                    cmd.init(&ctx);
+                                                    *state = CommandState::Executing;
+                                                }
+                                                CommandState::Executing => {
+                                                    if cmd.try_run(&ctx) {
+                                                        cmd.execute(&ctx);
+                                                    }
+                                                }
+                                            }
+                                            if *state != CommandState::Finished
+                                                && cmd.is_finished(&ctx)
+                                            {
+                                                *state = CommandState::Finished;
+                                            }
+                                        },
+                                    ));
+                                });
+                            }
+                        });
+                        let mut to_remove = to_remove.lock().unwrap().clone();
+                        to_remove.sort_unstable();
+
+                        for (offset, ele) in to_remove.into_iter().enumerate() {
+                            commands_locked.remove(ele - offset);
+                        }
+                    }
+                    *empty_mutex.lock().unwrap() = true;
+                    empty.notify_all();
+                    *empty_mutex.lock().unwrap() = false;
+                    std::thread::yield_now();
                 }
-                *empty_mutex.lock().unwrap() = true;
-                empty.notify_all();
-                *empty_mutex.lock().unwrap() = false;
-                std::thread::yield_now();
-            }
-        });
+            }),
+            kill,
+            kill_mutex,
+        ));
     }
 }
 
@@ -144,7 +199,8 @@ pub trait Command: Send + Sync + 'static {
     /// Initialize this command.
     #[allow(unused_variables)]
     fn init(&mut self, ctx: &FtcContext) {}
-    /// Execute this command.
+    /// Execute this command. Called in a loop and should not block for too long for risk of holding
+    /// up the command queue.
     fn execute(&mut self, ctx: &FtcContext);
     /// Whether to attempt to run this command. If not overridden, always returns true.
     ///

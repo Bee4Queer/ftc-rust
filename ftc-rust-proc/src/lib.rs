@@ -541,6 +541,8 @@ public class {class_name} extends {2} {{
 
                     iterative.call_stop(&ctx);
 
+                    ctx.stop_scheduler();
+
                     Ok(())
                 });
 

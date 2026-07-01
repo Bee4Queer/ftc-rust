@@ -4,6 +4,8 @@ use std::{
     any::Any,
     collections::HashMap,
     fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
     sync::{Arc, LazyLock, Mutex, atomic::AtomicI64},
     time::Duration,
 };
@@ -738,6 +740,7 @@ pub struct FtcContext {
 static STATE: LazyLock<Mutex<HashMap<i64, Box<dyn Any + Send + Sync + 'static>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Counter used to assign IDs to opmodes
 static OPMODE_COUNTER: AtomicI64 = AtomicI64::new(1);
 
 impl Debug for FtcContext {
@@ -758,6 +761,12 @@ impl Clone for FtcContext {
                 .unwrap(),
             vm: self.vm.clone(),
         }
+    }
+}
+
+impl Hash for FtcContext {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
     }
 }
 
@@ -786,7 +795,7 @@ impl FtcContext {
             this: env.new_global_ref(this).unwrap(),
             vm: env.get_java_vm().unwrap(),
         };
-        if out.get_id() == 0 {
+        if out.id() == 0 {
             out.vm
                 .attach_current_thread(|env| {
                     let local_ref = env.new_local_ref(&out.this)?;
@@ -804,21 +813,23 @@ impl FtcContext {
         }
         out
     }
-    /// Call a method with the state of this context. Panics if the associated state isn't the provided type.
+    /// Call a method with the state of this context. Panics if the associated state isn't the
+    /// provided type.
     pub fn with_state<State: Any + Default + Send + Sync + 'static, R>(
         &self,
         f: impl FnOnce(&mut State) -> R,
     ) -> R {
         let mut lock = STATE.lock().unwrap();
         let state = lock
-            .entry(self.get_id())
+            .entry(self.id())
             .or_insert_with(|| Box::new(State::default()))
             .downcast_mut::<State>()
             .unwrap();
         f(state)
     }
     /// Get the unique ID for this opmode.
-    pub fn get_id(&self) -> i64 {
+    #[must_use]
+    pub fn id(&self) -> i64 {
         self.vm
             .attach_current_thread(|env| {
                 let local_ref = env.new_local_ref(&self.this)?;
@@ -833,10 +844,7 @@ impl FtcContext {
     /// Whether the currently running opmode is iterative.
     #[must_use]
     pub fn is_iterative(&self) -> bool {
-        ITERATIVE_CONTEXTS
-            .lock()
-            .unwrap()
-            .contains_key(&self.get_id())
+        ITERATIVE_CONTEXTS.lock().unwrap().contains_key(&self.id())
     }
     /// Whether the currently running opmode is linear.
     #[must_use]
@@ -850,7 +858,7 @@ impl FtcContext {
             ITERATIVE_CONTEXTS
                 .lock()
                 .unwrap()
-                .get(&self.get_id())
+                .get(&self.id())
                 .unwrap()
                 .inner
                 .lock()
@@ -972,8 +980,13 @@ impl FtcContext {
     pub fn run_scheduler(&self) {
         SCHEDULER.write().unwrap().run(self.clone());
     }
-    /// Returns whether the `OpMode` is still running. If not (and a linear opmode), the op mode should exit as fast as
-    /// possible.
+    /// Run the scheduler.
+    #[doc(hidden)]
+    pub fn stop_scheduler(&self) {
+        SCHEDULER.write().unwrap().stop();
+    }
+    /// Returns whether the `OpMode` is still running. If not (and a linear opmode), the op mode
+    /// should exit as fast as possible.
     #[doc(alias = "opModeIsActive")]
     #[must_use]
     pub fn running(&self) -> bool {
@@ -1018,32 +1031,53 @@ pub enum OpModeStage {
 }
 
 /// The actual contexts. Used by [`IterativeContext::get_for`].
-static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<i64, IterativeContext>>> =
+static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<i64, IterativeContext<()>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The type of the iterative callbacks used in [`InnerIterativeContext`].
+type IterativeCallbacks = Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>;
 
 /// The actual data for [`IterativeContext`]
 #[derive(Default)]
 #[allow(clippy::type_complexity)]
 struct InnerIterativeContext {
     /// `init` callbacks
-    init: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    init: IterativeCallbacks,
     /// `init_loop` callbacks
-    init_loop: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    init_loop: IterativeCallbacks,
     /// `start` callbacks
-    start: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    start: IterativeCallbacks,
     /// `r#loop` callbacks
-    r#loop: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    r#loop: IterativeCallbacks,
     /// `stop` callbacks
-    stop: Vec<Box<dyn FnMut(&FtcContext) + Send + 'static>>,
+    stop: IterativeCallbacks,
     /// The current stage of this opmode.
     stage: OpModeStage,
 }
 
+/// A callback for an iterative opmode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(missing_docs)]
+pub enum IterativeCallback {
+    #[default]
+    Init,
+    InitLoop,
+    Start,
+    Loop,
+    Stop,
+}
+
 /// Type used to register callbacks for an iterative op mode.
 #[derive(Clone)]
-pub struct IterativeContext {
+pub struct IterativeContext<Phantom = *const ()>
+where
+    Phantom: ?Sized,
+{
     /// The reference-counted actual data.
     inner: Arc<Mutex<InnerIterativeContext>>,
+    /// Make it difficult for someone to store this in a static or similar as that is something
+    /// that you really should not do. Wish Rust allowed this to have a custom message.
+    _phantom: PhantomData<Phantom>,
 }
 
 impl Debug for IterativeContext {
@@ -1052,12 +1086,38 @@ impl Debug for IterativeContext {
     }
 }
 
-impl IterativeContext {
+impl IterativeContext<()> {
+    /// Convert this back to a regular [`IterativeContext`].
+    #[must_use]
+    pub fn to_normal(self) -> IterativeContext<*const ()> {
+        IterativeContext {
+            inner: self.inner,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl IterativeContext<*const ()> {
+    /// DO NOT USE THIS IF YOU JUST WANT TO DO REGULAR STUFF (access devices, telemetry, gamepads,
+    /// etc)! [`IterativeContext`] is for registering callbacks in an iterative opmode, and you
+    /// almost definitely just want to register a callback and then use the passed [`FtcContext`].
+    /// But there are some scenarios when you might want to use this.
+    ///
+    /// Convert this to a version of the type that is Send + Sync. Ninety-nine percent of the time
+    /// this is not what you want! This is basically only for power users if you really want to
+    /// register more callbacks during the lifecycle of a iterative opmode.
+    #[must_use]
+    pub fn to_send_sync(self) -> IterativeContext<()> {
+        IterativeContext {
+            inner: self.inner,
+            _phantom: PhantomData,
+        }
+    }
     #[doc(hidden)]
     pub fn get_for<'local>(env: &mut jni::Env<'local>, this: &JObject<'local>) -> Self {
         let this = env.new_local_ref(this).unwrap();
 
-        let id = FtcContext::new_no_log(env, this).get_id();
+        let id = FtcContext::new_no_log(env, this).id();
         match ITERATIVE_CONTEXTS.lock().unwrap().entry(id) {
             std::collections::hash_map::Entry::Occupied(occupied_entry) => {
                 occupied_entry.get().clone()
@@ -1065,29 +1125,64 @@ impl IterativeContext {
             std::collections::hash_map::Entry::Vacant(vacant_entry) => vacant_entry
                 .insert(IterativeContext {
                     inner: Arc::new(Mutex::new(InnerIterativeContext::default())),
+                    _phantom: PhantomData,
                 })
                 .clone(),
         }
+        .to_normal()
     }
-    /// Register a new callback for the `init` function. Does NOT overwrite any previous callbacks and just adds another.
+    /// Register a new callback. Does NOT overwrite any previous callbacks
+    /// and just adds another.
+    pub fn register(&self, at: IterativeCallback, f: impl FnMut(&FtcContext) + Send + 'static) {
+        let mut inner = self.inner.lock().unwrap();
+        let callbacks = match at {
+            IterativeCallback::Init => &mut inner.init,
+            IterativeCallback::InitLoop => &mut inner.init_loop,
+            IterativeCallback::Start => &mut inner.start,
+            IterativeCallback::Loop => &mut inner.r#loop,
+            IterativeCallback::Stop => &mut inner.stop,
+        };
+        callbacks.push(Box::new(f));
+    }
+    /// Register a new callback for the `init` function. Does NOT overwrite any previous callbacks
+    /// and just adds another.
+    ///
+    /// Prefer putting the body of a loop (and using [`FtcContext::with_state`] for anything
+    /// persistent) in [`init_loop`](IterativeContext::init_loop).
     pub fn init(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.inner.lock().unwrap().init.push(Box::new(f));
+        self.register(IterativeCallback::Init, f);
     }
-    /// Register a new callback for the `init_loop` function. Does NOT overwrite any previous callbacks and just adds another.
+    /// Register a new callback for the `init_loop` function. Does NOT overwrite any previous
+    /// callbacks and just adds another.
+    ///
+    /// This callback should not have any internal loops/unbounded recursion as it is called in a
+    /// loop by the runtime itself.
     pub fn init_loop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.inner.lock().unwrap().init_loop.push(Box::new(f));
+        self.register(IterativeCallback::InitLoop, f);
     }
-    /// Register a new callback for the `start` function. Does NOT overwrite any previous callbacks and just adds another.
+    /// Register a new callback for the `start` function. Does NOT overwrite any previous callbacks
+    /// and just adds another.
+    ///
+    /// Prefer putting the body of a loop (and using [`FtcContext::with_state`] for anything
+    /// persistent) in [`loop`](IterativeContext::r#loop).
     pub fn start(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.inner.lock().unwrap().start.push(Box::new(f));
+        self.register(IterativeCallback::Start, f);
     }
-    /// Register a new callback for the `loop` function. Does NOT overwrite any previous callbacks and just adds another.
+    /// Register a new callback for the `loop` function. Does NOT overwrite any previous callbacks
+    /// and just adds another.
+    ///
+    /// This callback should not have any internal loops/unbounded recursion as it is called in a
+    /// loop by the runtime itself.
     pub fn r#loop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.inner.lock().unwrap().r#loop.push(Box::new(f));
+        self.register(IterativeCallback::Loop, f);
     }
-    /// Register a new callback for the `stop` function. Does NOT overwrite any previous callbacks and just adds another.
+    /// Register a new callback for the `stop` function. Does NOT overwrite any previous callbacks
+    /// and just adds another.
+    ///
+    /// This should have minimal code needed for basic cleanup as it will be terminated by the
+    /// runtime if it takes too long.
     pub fn stop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.inner.lock().unwrap().stop.push(Box::new(f));
+        self.register(IterativeCallback::Stop, f);
     }
 
     #[doc(hidden)]
@@ -1129,7 +1224,7 @@ impl IterativeContext {
 
 pub mod policy;
 
-/// Better panic! that outputs a message through log since panics don't really work with the JNI
+/// Better `panic!` that outputs a message through log since panics don't really work with the JNI
 #[macro_export]
 macro_rules! panic {
     () => {
@@ -1144,7 +1239,8 @@ macro_rules! panic {
     };
 }
 
-/// Better unimplemented! that outputs a message through log since panics don't really work with the JNI
+/// Better `unimplemented!` that outputs a message through log since panics don't really work with
+/// the JNI
 #[macro_export]
 macro_rules! unimplemented {
     () => {
@@ -1155,7 +1251,7 @@ macro_rules! unimplemented {
     };
 }
 
-/// Better todo! that outputs a message through log since panics don't really work with the JNI
+/// Better `todo!` that outputs a message through log since panics don't really work with the JNI
 #[macro_export]
 macro_rules! todo {
     () => {
@@ -1166,7 +1262,8 @@ macro_rules! todo {
     };
 }
 
-/// Better unreachable! that outputs a message through log since panics don't really work with the JNI
+/// Better `unreachable!` that outputs a message through log since panics don't really work with the
+/// JNI
 #[macro_export]
 macro_rules! unreachable {
     () => {
@@ -1177,7 +1274,7 @@ macro_rules! unreachable {
     };
 }
 
-/// Better assert! that outputs a message through log since panics don't really work with the JNI
+/// Better `assert!` that outputs a message through log since panics don't really work with the JNI
 #[macro_export]
 macro_rules! assert {
     ($condition:expr $(,)?) => {
@@ -1198,7 +1295,8 @@ macro_rules! assert {
     };
 }
 
-/// Better debug_assert_eq! that outputs a message through log since panics don't really work with the JNI
+/// Better `assert_eq!` that outputs a message through log since panics don't really work with
+/// the JNI
 #[macro_export]
 macro_rules! assert_eq {
     ($val1:expr, $val2:expr $(,)?) => {
@@ -1209,7 +1307,8 @@ macro_rules! assert_eq {
     };
 }
 
-/// Better assert_ne! that outputs a message through log since panics don't really work with the JNI
+/// Better `assert_ne!` that outputs a message through log since panics don't really work with the
+/// JNI
 #[macro_export]
 macro_rules! assert_ne {
     ($val1:expr, $val2:expr $(,)?) => {
@@ -1220,7 +1319,8 @@ macro_rules! assert_ne {
     };
 }
 
-/// Better assert_matches! that outputs a message through log since panics don't really work with the JNI
+/// Better `assert_matches!` that outputs a message through log since panics don't really work with
+/// the JNI
 #[macro_export]
 macro_rules! assert_matches {
     ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
@@ -1231,7 +1331,8 @@ macro_rules! assert_matches {
     };
 }
 
-/// Better debug_assert! that outputs a message through log since panics don't really work with the JNI
+/// Better `debug_assert!` that outputs a message through log since panics don't really work with
+/// the JNI
 #[macro_export]
 macro_rules! debug_assert {
     ($condition:expr $(,)?) => {
@@ -1246,7 +1347,8 @@ macro_rules! debug_assert {
     };
 }
 
-/// Better debug_assert_eq! that outputs a message through log since panics don't really work with the JNI
+/// Better `debug_assert_eq!` that outputs a message through log since panics don't really work with
+/// the JNI
 #[macro_export]
 macro_rules! debug_assert_eq {
     ($val1:expr, $val2:expr $(,)?) => {
@@ -1261,7 +1363,8 @@ macro_rules! debug_assert_eq {
     };
 }
 
-/// Better debug_assert_ne! that outputs a message through log since panics don't really work with the JNI
+/// Better `debug_assert_ne!` that outputs a message through log since panics don't really work with
+/// the JNI
 #[macro_export]
 macro_rules! debug_assert_ne {
     ($val1:expr, $val2:expr $(,)?) => {
@@ -1276,7 +1379,8 @@ macro_rules! debug_assert_ne {
     };
 }
 
-/// Better assert_matches! that outputs a message through log since panics don't really work with the JNI
+/// Better `assert_matches!` that outputs a message through log since panics don't really work with
+/// the JNI
 #[macro_export]
 macro_rules! debug_assert_matches {
     ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
