@@ -11,33 +11,74 @@ macro_rules! call_method_device {
 /// Call a java method.
 #[macro_export]
 macro_rules! call_method {
-    (void $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
-        $self.vm.attach_current_thread(|env| {$crate::call_method!(env env, $obj, $name, $sig, $args)?; Ok::<(), jni::errors::Error>(())}).unwrap();
+    (env $env:expr, $obj:expr, $name:expr, $sig:expr, [] $(,)?) => {{
+        let env: &mut $crate::jni::Env = $env;
+        let obj = env.new_local_ref(&$obj).unwrap();
+        env
+            .call_method(
+                &obj,
+                $crate::jni::strings::JNIString::new($name),
+                $crate::jni::signature::RuntimeMethodSignature::from_str($sig).unwrap().method_signature(),
+                &[],
+            )
     }};
-    (obj $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
-        $self.vm.attach_current_thread(|env| {
+    (env $env:expr, $obj:expr, $name:expr, $sig:expr, $args:expr $(,)?) => {{
+        let env: &mut $crate::jni::Env = $env;
+        let obj = env.new_local_ref(&$obj).unwrap();
+        env
+            .call_method(
+                &obj,
+                $crate::jni::strings::JNIString::new($name),
+                $crate::jni::signature::RuntimeMethodSignature::from_str($sig).unwrap().method_signature(),
+                &$args.into_iter().map(|v| v.into()).collect::<Vec<$crate::jni::JValue>>(),
+            )
+    }};
+    ($ty:ident $self:expr, $($tt:tt)+) => {
+        $crate::call_method_vm!($ty $self.vm, $($tt)+)
+    };
+}
+
+/// Call a java method.
+#[macro_export]
+macro_rules! call_method_vm {
+    (void $vm:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
+        $vm.attach_current_thread(|env| {$crate::call_method!(env env, $obj, $name, $sig, $args)?; Ok::<(), jni::errors::Error>(())}).unwrap();
+    }};
+    (obj $vm:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
+        $vm.attach_current_thread(|env| {
             let object = $crate::call_method!(env env, $obj, $name, $sig, $args)?.l()?;
             $crate::new_global!(env, object)
         }).unwrap()
     }};
-    (double $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
-        $self.vm.attach_current_thread(|env| {
+    (double $vm:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
+        $vm.attach_current_thread(|env| {
             $crate::call_method!(env env, $obj, $name, $sig, $args)?.d()
         }).unwrap()
     }};
-    (float $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
-        $self.vm.attach_current_thread(|env| {
+    (float $vm:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
+        $vm.attach_current_thread(|env| {
             $crate::call_method!(env env, $obj, $name, $sig, $args)?.f()
         }).unwrap()
     }};
-    (int $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
-        $self.vm.attach_current_thread(|env| {
+    (int $vm:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
+        $vm.attach_current_thread(|env| {
             $crate::call_method!(env env, $obj, $name, $sig, $args)?.i()
         }).unwrap()
     }};
-    (bool $self:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
-        $self.vm.attach_current_thread(|env| {
+    (long $vm:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
+        $vm.attach_current_thread(|env| {
+            $crate::call_method!(env env, $obj, $name, $sig, $args)?.j()
+        }).unwrap()
+    }};
+    (bool $vm:expr, $obj:expr, $name:expr, $sig:expr, $args:tt $(,)?) => {{
+        $vm.attach_current_thread(|env| {
             $crate::call_method!(env env, $obj, $name, $sig, $args)?.z()
+        }).unwrap()
+    }};
+    (str $vm:expr, $obj:expr, $name:expr, $args:tt $(,)?) => {{
+        $vm.attach_current_thread(|env| {
+            let obj = $crate::call_method_vm!(env env, $obj, $name, "()Ljava/lang/String;", $args)?.l()?;
+            $crate::jni::objects::JString::cast_local(env, obj).unwrap().try_to_string(env)
         }).unwrap()
     }};
     (env $env:expr, $obj:expr, $name:expr, $sig:expr, [] $(,)?) => {{
@@ -153,13 +194,26 @@ macro_rules! index_jlist {
         {
             let env: &mut $crate::jni::Env = $env;
             let jlist = $crate::index_jlist!(env env, $obj; [$i]);
-            call_method!(
+            $crate::call_method!(
                 env env,
                 jlist,
                 "floatValue",
                 "()F",
                 []
             ).unwrap().f().unwrap()
+        }
+    };
+    (double $env:expr, $obj:expr; [$i:expr]) => {
+        {
+            let env: &mut $crate::jni::Env = $env;
+            let jlist = $crate::index_jlist!(env env, $obj; [$i]);
+            $crate::call_method!(
+                env env,
+                jlist,
+                "doubleValue",
+                "()F",
+                []
+            ).unwrap().d().unwrap()
         }
     };
     (env $env:expr, $obj:expr; [$i:expr]) => {
@@ -178,7 +232,7 @@ macro_rules! jlist {
             let class = env.find_class(JList::class_name()).unwrap();
             let obj = env.new_object(class, $crate::jni::jni_sig!("()Ljava/util/List;"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
-            let class = env.find_class($crate::jni::jni_str!("Ljava/lang/Float;")).unwrap();
+            let class = env.find_class($crate::jni::jni_str!("java/lang/Float")).unwrap();
             $(
                 let arg = env.new_object(&class, $crate::jni::jni_sig!("(F)Ljava/lang/Float;"), &[$args.into()]).unwrap();
                 out.add(env, &arg).unwrap();

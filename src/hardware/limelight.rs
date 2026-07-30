@@ -11,13 +11,13 @@ use jni::{
 };
 
 use crate::{
-    call_method, debug_assert, get_field, hardware::IntoJniObject, index_jlist, jlist, panic, todo,
+    call_method, debug_assert, get_field, hardware::{IntoJniObject, limelight::results::LLResult}, index_jlist, jlist, new_global, panic, todo,
 };
 
 /// Javadoc available at <https://javadoc.io/static/org.firstinspires.ftc/Hardware/11.1.0/com/qualcomm/hardware/limelightvision/Limelight3A.html>.
 ///
-/// Driver for Limelight 3A Vision Sensor. `Limelight3A` provides support for the Limelight Vision
-/// Limelight 3A Vision Sensor.
+/// Driver for Limelight 3A Vision Sensor. `Limelight3A` provides support for
+/// the Limelight Vision Limelight 3A Vision Sensor.
 #[doc(hidden)]
 struct Limelight3AInner {
     /// The environment.
@@ -37,8 +37,8 @@ impl std::fmt::Debug for Limelight3AInner {
 
 /// Javadoc available at <https://javadoc.io/static/org.firstinspires.ftc/Hardware/11.1.0/com/qualcomm/hardware/limelightvision/Limelight3A.html>.
 ///
-/// Driver for Limelight 3A Vision Sensor. `Limelight3A` provides support for the Limelight Vision
-/// Limelight 3A Vision Sensor.
+/// Driver for Limelight 3A Vision Sensor. `Limelight3A` provides support for
+/// the Limelight Vision Limelight 3A Vision Sensor.
 ///
 /// Default is essentially a null pointer and will panic upon attempted use.
 #[repr(transparent)]
@@ -97,8 +97,9 @@ impl crate::hardware::Device for Limelight3A {
     }
 }
 
-/// Temporary configuration struct used for changing configuration of a [`Limelight3A`]. Shouldn't
-/// be stored usually, as it prevents usage of the base `Limelight3A` instance until it is dropped.
+/// Temporary configuration struct used for changing configuration of a
+/// [`Limelight3A`]. Shouldn't be stored usually, as it prevents usage of the
+/// base `Limelight3A` instance until it is dropped.
 pub struct Limelight3AConfig<'a> {
     #[allow(clippy::missing_docs_in_private_items)]
     limelight: &'a Limelight3A,
@@ -114,7 +115,8 @@ impl std::fmt::Debug for Limelight3AConfig<'_> {
 }
 
 impl Limelight3AConfig<'_> {
-    /// Sets the poll rate in Hertz (Hz). The rate must be between 1 and 250 inclusive.
+    /// Sets the poll rate in Hertz (Hz). The rate must be between 1 and 250
+    /// inclusive.
     #[doc(alias = "setPollRateHz")]
     pub fn set_poll_rate(&self, hz: u8) {
         debug_assert!((1..=250).contains(&hz));
@@ -392,7 +394,8 @@ impl Limelight3A {
     }
 
     #[allow(clippy::doc_markdown)]
-    /// Updates the robot orientation for MegaTag2. Yaw value should be aligned with the field map.
+    /// Updates the robot orientation for MegaTag2. Yaw value should be aligned
+    /// with the field map.
     ///
     /// Literally no idea what the returned boolean is.
     #[doc(alias = "updateRobotOrientation")]
@@ -457,8 +460,8 @@ impl Limelight3A {
         LLStatus::from_jni_object(self.vm(), global)
     }
 
-    /// Uploads a new fiducial field map. Panics in debug builds if map is empty or doesn't specify
-    /// a type.
+    /// Uploads a new fiducial field map. Panics in debug builds if map is empty
+    /// or doesn't specify a type.
     #[doc(alias = "uploadFieldmap")]
     #[must_use]
     pub fn upload_fieldmap(&self, map: LLFieldMap, index: usize) -> bool {
@@ -504,11 +507,28 @@ impl Limelight3A {
             })
             .unwrap()
     }
+
+    /// Gets the latest result from the Limelight.
+    #[doc(alias = "getLatestResult")]
+    pub fn result(&self) -> LLResult {
+        self.vm()
+            .attach_current_thread(|env| {
+                jni::errors::Result::Ok(LLResult::from_jni_object(self.vm(), new_global!(env, call_method!(
+                    env env,
+                    self.object(),
+                    "getLatestResult",
+                    "()Lcom/qualcomm/hardware/limelightvision/LLResult;",
+                    []
+                )?.l()?)?))
+            })
+            .unwrap()
+    }
 }
 
 impl Drop for Limelight3A {
     fn drop(&mut self) {
         self.stop();
+        self.shutdown();
     }
 }
 
@@ -709,5 +729,544 @@ impl IntoJniObject for LLFieldMap {
             &[(&fiducials).into(), (&ty).into()],
         )
         .unwrap()
+    }
+}
+
+/// Opaque limelight-local timestamp. Monotonic. Can be compared with itself but
+/// not directly made.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct LLTimestamp(f64);
+
+/// Result structs
+#[allow(missing_docs)]
+pub mod results {
+    use std::time::Duration;
+
+    use glam::Vec3;
+    use jni::objects::JList;
+
+    use crate::{
+        call_method, call_method_vm, get_field,
+        hardware::{IntoJniObject, Pose3D, limelight::LLTimestamp},
+        index_jlist, jlist_f64, jlist_map, unimplemented,
+    };
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Stddevs {
+        pub x: f64,
+        pub y: f64,
+        pub z: f64,
+        pub roll: f64,
+        pub pitch: f64,
+        pub yaw: f64,
+    }
+
+    impl IntoJniObject for Stddevs {
+        const JAVA_CLASS: &'static str = "java.util.List";
+        const JNI_CLASS: &'static str = "java/util/List";
+        fn into_jni_object<'local>(
+            self,
+            _env: &mut jni::Env<'local>,
+        ) -> jni::objects::JObject<'local> {
+            unimplemented!();
+        }
+        fn from_jni_object(
+            vm: &jni::vm::JavaVM,
+            obj: jni::refs::Global<jni::objects::JObject<'static>>,
+        ) -> Self {
+            vm.attach_current_thread(|env| {
+                let obj = env.new_local_ref(obj)?;
+                let obj = JList::cast_local(env, obj)?;
+                jni::errors::Result::Ok(Stddevs {
+                    x: index_jlist!(double env, obj; [0]),
+                    y: index_jlist!(double env, obj; [1]),
+                    z: index_jlist!(double env, obj; [2]),
+                    roll: index_jlist!(double env, obj; [3]),
+                    pitch: index_jlist!(double env, obj; [4]),
+                    yaw: index_jlist!(double env, obj; [5]),
+                })
+            })
+            .unwrap()
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    #[must_use]
+    pub struct BarcodeResult {
+        pub family: String,
+        pub data: String,
+        /// Pixels from the crosshair.
+        pub tx_pix: f64,
+        /// Pixels from the crosshair.
+        pub ty_pix: f64,
+        /// Degrees from the crosshair.
+        pub tx_deg: f64,
+        /// Degrees from the crosshair.
+        pub ty_deg: f64,
+        /// Degrees from the principal pixel.
+        pub tx_deg_nc: f64,
+        /// Degrees from the principal pixel.
+        pub ty_deg_nc: f64,
+        /// The area of the target as a percentage of the image area.
+        pub ta: f64,
+        pub target_corners: Vec<Vec3>,
+    }
+
+    impl IntoJniObject for BarcodeResult {
+        const JAVA_CLASS: &'static str =
+            "com.qualcomm.hardware.limelightvision.LLResultTypes.BarcodeResult";
+        const JNI_CLASS: &'static str =
+            "com/qualcomm/hardware/limelightvision/LLResultTypes$BarcodeResult";
+        fn into_jni_object<'local>(
+            self,
+            _env: &mut jni::Env<'local>,
+        ) -> jni::objects::JObject<'local> {
+            unimplemented!();
+        }
+        fn from_jni_object(
+            vm: &jni::vm::JavaVM,
+            obj: jni::refs::Global<jni::objects::JObject<'static>>,
+        ) -> Self {
+            vm.attach_current_thread(|env| {
+                let obj = env.new_local_ref(obj)?;
+                let corners = get_field!(local_obj env, obj, "targetCorners", "Ljava/util/List;");
+                let corners = JList::cast_local(env, corners)?.iter(env)?;
+
+                let mut out_corners = Vec::new();
+
+                while let Some(corner) = corners.next(env)? {
+                    let corner = JList::cast_local(env, corner)?;
+                    out_corners.push(Vec3 {
+                        x: index_jlist!(double env, corner; [0]) as f32,
+                        y: index_jlist!(double env, corner; [1]) as f32,
+                        z: index_jlist!(double env, corner; [2]) as f32,
+                    });
+                }
+
+                jni::errors::Result::Ok(BarcodeResult {
+                    family: get_field!(str env, obj, "family"),
+                    data: get_field!(str env, obj, "data"),
+                    tx_pix: get_field!(double env, obj, "targetXPixels"),
+                    ty_pix: get_field!(double env, obj, "targetYPixels"),
+                    tx_deg: get_field!(double env, obj, "targetXDegrees"),
+                    ty_deg: get_field!(double env, obj, "targetYDegrees"),
+                    tx_deg_nc: get_field!(double env, obj, "targetXDegreesNoCrosshair"),
+                    ty_deg_nc: get_field!(double env, obj, "targetYDegreesNoCrosshair"),
+                    ta: get_field!(double env, obj, "targetArea"),
+                    target_corners: out_corners,
+                })
+            })
+            .unwrap()
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    #[must_use]
+    pub struct ClassifierResult {
+        pub class_name: String,
+        pub class_id: usize,
+        pub confidence: f64,
+    }
+
+    impl IntoJniObject for ClassifierResult {
+        const JAVA_CLASS: &'static str =
+            "com.qualcomm.hardware.limelightvision.LLResultTypes.ClassifierResult";
+        const JNI_CLASS: &'static str =
+            "com/qualcomm/hardware/limelightvision/LLResultTypes$ClassifierResult";
+        fn into_jni_object<'local>(
+            self,
+            _env: &mut jni::Env<'local>,
+        ) -> jni::objects::JObject<'local> {
+            unimplemented!();
+        }
+        fn from_jni_object(
+            vm: &jni::vm::JavaVM,
+            obj: jni::refs::Global<jni::objects::JObject<'static>>,
+        ) -> Self {
+            vm.attach_current_thread(|env| {
+                let obj = env.new_local_ref(obj)?;
+
+                jni::errors::Result::Ok(ClassifierResult {
+                    class_name: get_field!(str env, obj, "className"),
+                    class_id: get_field!(int env, obj, "classId") as usize,
+                    confidence: get_field!(double env, obj, "confidence"),
+                })
+            })
+            .unwrap()
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    #[must_use]
+    pub struct DetectorResult {
+        /// The class name of the detector result (eg book, car, gamepiece).
+        pub class_name: String,
+        pub class_id: usize,
+        pub confidence: f64,
+        /// Pixels from the crosshair.
+        pub tx_pix: f64,
+        /// Pixels from the crosshair.
+        pub ty_pix: f64,
+        /// Degrees from the crosshair.
+        pub tx_deg: f64,
+        /// Degrees from the crosshair.
+        pub ty_deg: f64,
+        /// Degrees from the principal pixel.
+        pub tx_deg_nc: f64,
+        /// Degrees from the principal pixel.
+        pub ty_deg_nc: f64,
+        /// The area of the target as a percentage of the image area.
+        pub ta: f64,
+        pub target_corners: Vec<Vec3>,
+    }
+
+    impl IntoJniObject for DetectorResult {
+        const JAVA_CLASS: &'static str =
+            "com.qualcomm.hardware.limelightvision.LLResultTypes.DetectorResult";
+        const JNI_CLASS: &'static str =
+            "com/qualcomm/hardware/limelightvision/LLResultTypes$DetectorResult";
+        fn into_jni_object<'local>(
+            self,
+            _env: &mut jni::Env<'local>,
+        ) -> jni::objects::JObject<'local> {
+            unimplemented!();
+        }
+        fn from_jni_object(
+            vm: &jni::vm::JavaVM,
+            obj: jni::refs::Global<jni::objects::JObject<'static>>,
+        ) -> Self {
+            vm.attach_current_thread(|env| {
+                let obj = env.new_local_ref(obj)?;
+                let corners = get_field!(local_obj env, obj, "targetCorners", "Ljava/util/List;");
+                let corners = JList::cast_local(env, corners)?.iter(env)?;
+
+                let mut out_corners = Vec::new();
+
+                while let Some(corner) = corners.next(env)? {
+                    let corner = JList::cast_local(env, corner)?;
+                    out_corners.push(Vec3 {
+                        x: index_jlist!(double env, corner; [0]) as f32,
+                        y: index_jlist!(double env, corner; [1]) as f32,
+                        z: index_jlist!(double env, corner; [2]) as f32,
+                    });
+                }
+
+                jni::errors::Result::Ok(DetectorResult {
+                    tx_pix: get_field!(double env, obj, "targetXPixels"),
+                    ty_pix: get_field!(double env, obj, "targetYPixels"),
+                    tx_deg: get_field!(double env, obj, "targetXDegrees"),
+                    ty_deg: get_field!(double env, obj, "targetYDegrees"),
+                    tx_deg_nc: get_field!(double env, obj, "targetXDegreesNoCrosshair"),
+                    ty_deg_nc: get_field!(double env, obj, "targetYDegreesNoCrosshair"),
+                    ta: get_field!(double env, obj, "targetArea"),
+                    target_corners: out_corners,
+                    class_name: get_field!(str env, obj, "className"),
+                    class_id: get_field!(int env, obj, "classId") as usize,
+                    confidence: get_field!(double env, obj, "confidence"),
+                })
+            })
+            .unwrap()
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    #[must_use]
+    pub struct FiducialResult {
+        pub fiducial_id: usize,
+        /// The family of the fiducial (eg 36h11).
+        pub family: String,
+        pub skew: f64,
+        pub camera_pose_target_space: Pose3D,
+        pub robot_pose_field_space: Pose3D,
+        pub robot_pose_target_space: Pose3D,
+        pub target_pose_camera_space: Pose3D,
+        pub target_pose_robot_space: Pose3D,
+        /// Pixels from the crosshair.
+        pub tx_pix: f64,
+        /// Pixels from the crosshair.
+        pub ty_pix: f64,
+        /// Degrees from the crosshair.
+        pub tx_deg: f64,
+        /// Degrees from the crosshair.
+        pub ty_deg: f64,
+        /// Degrees from the principal pixel.
+        pub tx_deg_nc: f64,
+        /// Degrees from the principal pixel.
+        pub ty_deg_nc: f64,
+        /// The area of the target as a percentage of the image area.
+        pub ta: f64,
+        pub target_corners: Vec<Vec3>,
+    }
+
+    impl IntoJniObject for FiducialResult {
+        const JAVA_CLASS: &'static str =
+            "com.qualcomm.hardware.limelightvision.LLResultTypes.DetectorResult";
+        const JNI_CLASS: &'static str =
+            "com/qualcomm/hardware/limelightvision/LLResultTypes$DetectorResult";
+        fn into_jni_object<'local>(
+            self,
+            _env: &mut jni::Env<'local>,
+        ) -> jni::objects::JObject<'local> {
+            unimplemented!();
+        }
+        fn from_jni_object(
+            vm: &jni::vm::JavaVM,
+            obj: jni::refs::Global<jni::objects::JObject<'static>>,
+        ) -> Self {
+            vm.attach_current_thread(|env| {
+                let obj = env.new_local_ref(obj)?;
+                let corners = get_field!(local_obj env, obj, "targetCorners", "Ljava/util/List;");
+                let corners = JList::cast_local(env, corners)?.iter(env)?;
+
+                let mut out_corners = Vec::new();
+
+                while let Some(corner) = corners.next(env)? {
+                    let corner = JList::cast_local(env, corner)?;
+                    out_corners.push(Vec3 {
+                        x: index_jlist!(double env, corner; [0]) as f32,
+                        y: index_jlist!(double env, corner; [1]) as f32,
+                        z: index_jlist!(double env, corner; [2]) as f32,
+                    });
+                }
+
+                jni::errors::Result::Ok(FiducialResult {
+                    tx_pix: get_field!(double env, obj, "targetXPixels"),
+                    ty_pix: get_field!(double env, obj, "targetYPixels"),
+                    tx_deg: get_field!(double env, obj, "targetXDegrees"),
+                    ty_deg: get_field!(double env, obj, "targetYDegrees"),
+                    tx_deg_nc: get_field!(double env, obj, "targetXDegreesNoCrosshair"),
+                    ty_deg_nc: get_field!(double env, obj, "targetYDegreesNoCrosshair"),
+                    ta: get_field!(double env, obj, "targetArea"),
+                    target_corners: out_corners,
+                    fiducial_id: get_field!(int env, obj, "fiducialId") as usize,
+                    family: get_field!(str env, obj, "targetArea"),
+                    skew: get_field!(double env, obj, "skew"),
+                    camera_pose_target_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "cameraPoseTargetSpace", Pose3D::JNI_CLASS),
+                    ),
+                    robot_pose_field_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "robotPoseFieldSpace", Pose3D::JNI_CLASS),
+                    ),
+                    robot_pose_target_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "robotPoseTargetSpace", Pose3D::JNI_CLASS),
+                    ),
+                    target_pose_camera_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "targetPoseCameraSpace", Pose3D::JNI_CLASS),
+                    ),
+                    target_pose_robot_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "targetPoseRobotSpace", Pose3D::JNI_CLASS),
+                    ),
+                })
+            })
+            .unwrap()
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    #[must_use]
+    pub struct ColorResult {
+        pub camera_pose_target_space: Pose3D,
+        pub robot_pose_field_space: Pose3D,
+        pub robot_pose_target_space: Pose3D,
+        pub target_pose_camera_space: Pose3D,
+        pub target_pose_robot_space: Pose3D,
+        /// Pixels from the crosshair.
+        pub tx_pix: f64,
+        /// Pixels from the crosshair.
+        pub ty_pix: f64,
+        /// Degrees from the crosshair.
+        pub tx_deg: f64,
+        /// Degrees from the crosshair.
+        pub ty_deg: f64,
+        /// Degrees from the principal pixel.
+        pub tx_deg_nc: f64,
+        /// Degrees from the principal pixel.
+        pub ty_deg_nc: f64,
+        /// The area of the target as a percentage of the image area.
+        pub ta: f64,
+        /// Corner points of the target.
+        pub target_corners: Vec<Vec3>,
+    }
+
+    impl IntoJniObject for ColorResult {
+        const JAVA_CLASS: &'static str =
+            "com.qualcomm.hardware.limelightvision.LLResultTypes.ColorResult";
+        const JNI_CLASS: &'static str =
+            "com/qualcomm/hardware/limelightvision/LLResultTypes$ColorResult";
+        fn into_jni_object<'local>(
+            self,
+            _env: &mut jni::Env<'local>,
+        ) -> jni::objects::JObject<'local> {
+            unimplemented!();
+        }
+        fn from_jni_object(
+            vm: &jni::vm::JavaVM,
+            obj: jni::refs::Global<jni::objects::JObject<'static>>,
+        ) -> Self {
+            vm.attach_current_thread(|env| {
+                let obj = env.new_local_ref(obj)?;
+                let corners = get_field!(local_obj env, obj, "targetCorners", "Ljava/util/List;");
+                let corners = JList::cast_local(env, corners)?.iter(env)?;
+
+                let mut out_corners = Vec::new();
+
+                while let Some(corner) = corners.next(env)? {
+                    let corner = JList::cast_local(env, corner)?;
+                    out_corners.push(Vec3 {
+                        x: index_jlist!(double env, corner; [0]) as f32,
+                        y: index_jlist!(double env, corner; [1]) as f32,
+                        z: index_jlist!(double env, corner; [2]) as f32,
+                    });
+                }
+
+                jni::errors::Result::Ok(ColorResult {
+                    tx_pix: get_field!(double env, obj, "targetXPixels"),
+                    ty_pix: get_field!(double env, obj, "targetYPixels"),
+                    tx_deg: get_field!(double env, obj, "targetXDegrees"),
+                    ty_deg: get_field!(double env, obj, "targetYDegrees"),
+                    tx_deg_nc: get_field!(double env, obj, "targetXDegreesNoCrosshair"),
+                    ty_deg_nc: get_field!(double env, obj, "targetYDegreesNoCrosshair"),
+                    ta: get_field!(double env, obj, "targetArea"),
+                    target_corners: out_corners,
+                    camera_pose_target_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "cameraPoseTargetSpace", Pose3D::JNI_CLASS),
+                    ),
+                    robot_pose_field_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "robotPoseFieldSpace", Pose3D::JNI_CLASS),
+                    ),
+                    robot_pose_target_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "robotPoseTargetSpace", Pose3D::JNI_CLASS),
+                    ),
+                    target_pose_camera_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "targetPoseCameraSpace", Pose3D::JNI_CLASS),
+                    ),
+                    target_pose_robot_space: Pose3D::from_jni_object(
+                        vm,
+                        get_field!(obj env, obj, "targetPoseRobotSpace", Pose3D::JNI_CLASS),
+                    ),
+                })
+            })
+            .unwrap()
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    #[must_use]
+    pub struct LLResult {
+        pub barcodes: Vec<BarcodeResult>,
+        pub classifiers: Vec<ClassifierResult>,
+        pub detectors: Vec<DetectorResult>,
+        pub fiducials: Vec<FiducialResult>,
+        pub colors: Vec<ColorResult>,
+        /// JSON parse latency.
+        pub parse_latency: Duration,
+        /// Mostly opaque value from Java listing the timestamp from the control
+        /// hub in milliseconds. Unsure if monotonic?
+        pub control_hub_timestamp: i64,
+        /// How old the data is. NOT UPDATED BY RUST, VALUE FROM JAVA MAY BE OUT
+        /// OF DATE!
+        #[doc(alias = "staleness")]
+        pub age: Duration,
+        pub focus_metric: f64,
+        pub botpose: Pose3D,
+        #[allow(clippy::doc_markdown)]
+        /// The 3D botpose using MegaTag2.
+        pub botpose_mt2: Pose3D,
+        #[allow(clippy::doc_markdown)]
+        /// The standard deviation metrics for MegaTag1 (x,y,z,roll,pitch,yaw).
+        pub botpose_mt1_stddev: Stddevs,
+        #[allow(clippy::doc_markdown)]
+        /// The standard deviation metrics for MegaTag2 (x,y,z,roll,pitch,yaw).
+        pub botpose_mt2_stddev: Stddevs,
+        /// The number of tags used in the botpose calculation.
+        pub botpose_tag_count: usize,
+        /// The span of tags used in the botpose calculation in meters.
+        pub botpose_span: f64,
+        /// The average distance of tags used in the botpose calculation in
+        /// meters.
+        pub botpose_avg_dist: f64,
+        /// The average area of tags used in the botpose calculation.
+        pub botpose_avg_area: f64,
+        /// The user-specified python snapscript output data.
+        pub python_output: Vec<f64>,
+        pub capture_latency: Duration,
+        pub pipeline_type: String,
+        /// Degrees from the crosshair.
+        pub tx: f64,
+        /// Degrees from the crosshair.
+        pub ty: f64,
+        /// Degrees from the principal pixel.
+        pub tx_nc: f64,
+        /// Degrees from the principal pixel.
+        pub ty_nc: f64,
+        /// The area of the target as a percentage of the image area.
+        pub ta: f64,
+        /// The index of the currently active pipeline.
+        pub pipeline_index: usize,
+        pub timestamp: LLTimestamp,
+        /// Targeting/pipeline latency.
+        pub targeting_latency: Duration,
+        pub valid: bool,
+    }
+
+    impl IntoJniObject for LLResult {
+        const JAVA_CLASS: &'static str = "com.qualcomm.hardware.limelightvision.LLResult";
+        const JNI_CLASS: &'static str = "com/qualcomm/hardware/limelightvision/LLResult";
+        fn into_jni_object<'local>(
+            self,
+            _env: &mut jni::Env<'local>,
+        ) -> jni::objects::JObject<'local> {
+            unimplemented!();
+        }
+        fn from_jni_object(
+            vm: &jni::vm::JavaVM,
+            obj: jni::refs::Global<jni::objects::JObject<'static>>,
+        ) -> Self {
+            vm.attach_current_thread(|env| {
+                let obj = env.new_local_ref(obj)?;
+
+                jni::errors::Result::Ok(LLResult {
+                    barcodes: jlist_map(vm, call_method!(env env, obj, "getBarcodeResults", "()Ljava/util/List;", [])?.l()?)?,
+                    classifiers: jlist_map(vm, call_method!(env env, obj, "getClassifierResults", "()Ljava/util/List;", [])?.l()?)?,
+                    detectors: jlist_map(vm, call_method!(env env, obj, "getDetectorResults", "()Ljava/util/List;", [])?.l()?)?,
+                    fiducials: jlist_map(vm, call_method!(env env, obj, "getFiducialResults", "()Ljava/util/List;", [])?.l()?)?,
+                    colors: jlist_map(vm, call_method!(env env, obj, "getColorResults", "()Ljava/util/List;", [])?.l()?)?,
+                    parse_latency: Duration::from_secs_f64(call_method_vm!(double vm, obj, "getParseLatency", "()D", [])),
+                    control_hub_timestamp: call_method_vm!(long vm, obj, "getControlHubTimeStamp", "()J", []),
+                    age: Duration::from_secs(call_method_vm!(long vm, obj, "getStaleness", "()J", []) as u64),
+                    focus_metric: call_method_vm!(double vm, obj, "getFocusMetric", "()D", []),
+                    botpose: Pose3D::from_jni_object(vm, call_method_vm!(obj vm, obj, "getBotpose", "()Lorg/firstinspires/ftc/robotcore/external/navigation/Pose3D;", [])),
+                    botpose_mt2: Pose3D::from_jni_object(vm, call_method_vm!(obj vm, obj, "getBotpose_MT2", "()Lorg/firstinspires/ftc/robotcore/external/navigation/Pose3D;", [])),
+                    botpose_mt1_stddev: Stddevs::from_jni_object(vm, call_method_vm!(obj vm, obj, "getStddevMt1", "()Ljava/util/List;", [])),
+                    botpose_mt2_stddev: Stddevs::from_jni_object(vm, call_method_vm!(obj vm, obj, "getStddevMt2", "()Ljava/util/List;", [])),
+                    botpose_tag_count: call_method_vm!(int vm, obj, "getBotposeTagCount", "()I", []) as usize,
+                    botpose_span: call_method_vm!(double vm, obj, "getBotposeSpan", "()D", []),
+                    botpose_avg_dist: call_method_vm!(double vm, obj, "getBotposeAvgDist", "()D", []),
+                    botpose_avg_area: call_method_vm!(double vm, obj, "getBotposeAvgArea", "()D", []),
+                    python_output: jlist_f64(vm, call_method!(env env, obj, "getPythonOutput", "()Ljava/util/List;", [])?.l()?)?,
+                    capture_latency: Duration::from_secs_f64(call_method_vm!(double vm, obj, "getCaptureLatency", "()D", [])),
+                    pipeline_type: call_method_vm!(str vm, obj, "getBotposeAvgArea", []),
+                    tx: call_method_vm!(double vm, obj, "getTx", "()D", []),
+                    ty: call_method_vm!(double vm, obj, "getTy", "()D", []),
+                    tx_nc: call_method_vm!(double vm, obj, "getTxNC", "()D", []),
+                    ty_nc: call_method_vm!(double vm, obj, "getTyNC", "()D", []),
+                    ta: call_method_vm!(double vm, obj, "getTa", "()D", []),
+                    pipeline_index: call_method_vm!(int vm, obj, "getPipelineIndex", "()I", []) as usize,
+                    timestamp: LLTimestamp(call_method_vm!(double vm, obj, "getTimestamp", "()D", [])),
+                    targeting_latency: Duration::from_secs_f64(call_method_vm!(double vm, obj, "getTargetingLatency", "()D", []) / 1000.0),
+                    valid: call_method_vm!(bool vm, obj, "isValid", "()Z", []),
+                })
+            })
+            .unwrap()
+        }
     }
 }

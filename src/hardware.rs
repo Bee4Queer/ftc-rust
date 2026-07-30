@@ -6,9 +6,9 @@ use std::{
     fmt::{Debug, Display},
 };
 
-use glam::{Quat, vec4};
+use glam::{Quat, Vec3, vec4};
 use jni::{
-    Env, JavaVM, jni_sig,
+    Env, JavaVM, jni_sig, jni_str,
     objects::{JClass, JObject, JString},
     refs::Global,
     signature::{RuntimeFieldSignature, RuntimeMethodSignature},
@@ -24,8 +24,17 @@ use log::{error, trace};
 use crate::{call_method, debug_assert, get_field, new_global, new_string, unimplemented};
 
 /// A device that can be made from a java object.
+///
+/// Default implementation should
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a device",
+    label = "not a device",
+    note = "`IntoJniObject` and `Device` are separate traits; implement `Device` if it is a \
+            device, and `IntoJniObject` otherwise"
+)]
 pub trait Device: Default {
-    /// Create a new instance of this type from the java environment and the relevant object.
+    /// Create a new instance of this type from the java environment and the
+    /// relevant object.
     #[must_use]
     fn from_java(vm: JavaVM, object: Global<JObject<'static>>) -> Self;
     /// The Java-formatted class name. Unlike other JNI things, this uses dots.
@@ -33,7 +42,8 @@ pub trait Device: Default {
     /// The JNI-formatted class name. Uses forward slashes instead of dots.
     const JNI_CLASS: &'static str;
 
-    /// Returns the URL to the javadoc of this `Device`. Mostly useful for debugging purposes.
+    /// Returns the URL to the javadoc of this `Device`. Mostly useful for
+    /// debugging purposes.
     #[must_use]
     fn javadoc() -> String {
         let segments = Self::JNI_CLASS.split('/').collect::<Vec<_>>();
@@ -55,7 +65,8 @@ pub trait Device: Default {
 pub struct Hardware {
     /// The environment.
     pub(crate) vm: JavaVM,
-    /// The actual hardwareMap object. Should be com/qualcomm/robotcore/hardware/HardwareMap.
+    /// The actual hardwareMap object. Should be
+    /// com/qualcomm/robotcore/hardware/HardwareMap.
     pub(crate) hardware_map: Global<JObject<'static>>,
 }
 
@@ -187,13 +198,22 @@ macro_rules! enum_variant_into {
 }
 
 /// Convert this type to/from a JNI object.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a JNI object",
+    label = "not a JNI object",
+    note = "`IntoJniObject` and `Device` are separate traits; implement `Device` if it is a \
+            device, and `IntoJniObject` otherwise"
+)]
 pub trait IntoJniObject {
-    /// The JNI-formatted class name.
+    /// The JNI-formatted class name. DO NOT assume this is unique! Multiple
+    /// types may use the same class, some are wrappers around Lists!
     const JNI_CLASS: &'static str;
-    /// The Java-formatted class name.
+    /// The Java-formatted class name. DO NOT assume this is unique! Multiple
+    /// types may use the same class, some are wrappers around Lists!
     const JAVA_CLASS: &'static str;
 
-    /// Returns the URL to the javadoc of this JNI object. Mostly useful for debugging purposes.
+    /// Returns the URL to the javadoc of this JNI object. Mostly useful for
+    /// debugging purposes.
     #[must_use]
     fn javadoc() -> String {
         let segments = Self::JNI_CLASS.split('/').collect::<Vec<_>>();
@@ -252,12 +272,14 @@ impl IntoJniObject for Quat {
 
 /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotorSimple.Direction.html>.
 ///
-/// `DcMotor`s can be configured to internally reverse the values to which, e.g., their motor power
-/// is set. This makes it easy to have drive train motors on two sides of a robot: during
-/// initialization, one would be set at at forward, the other at reverse, and the difference between
-/// the two in that respect could be there after ignored.
+/// `DcMotor`s can be configured to internally reverse the values to which,
+/// e.g., their motor power is set. This makes it easy to have drive train
+/// motors on two sides of a robot: during initialization, one would be set at
+/// at forward, the other at reverse, and the difference between the two in that
+/// respect could be there after ignored.
 ///
-/// At the start of an `OpMode`, motors are guaranteed to be in the forward direction.
+/// At the start of an `OpMode`, motors are guaranteed to be in the forward
+/// direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[must_use]
 pub enum Direction {
@@ -292,20 +314,22 @@ impl Direction {
 
 /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.ZeroPowerBehavior.html>.
 ///
-/// `ZeroPowerBehavior` provides an indication as to a motor's behavior when a power level of zero
-/// is applied.
+/// `ZeroPowerBehavior` provides an indication as to a motor's behavior when a
+/// power level of zero is applied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[must_use]
 pub enum ZeroPowerBehavior {
-    /// The behavior of the motor when zero power is applied is not currently known. This value is
-    /// mostly useful for your internal state variables. It may not be passed as a parameter to
-    /// `set_zero_power_behavior` and will never be returned from `get_zero_power_behavior`.
+    /// The behavior of the motor when zero power is applied is not currently
+    /// known. This value is mostly useful for your internal state
+    /// variables. It may not be passed as a parameter to
+    /// `set_zero_power_behavior` and will never be returned from
+    /// `get_zero_power_behavior`.
     Unknown,
-    /// The motor stops and then brakes, actively resisting any external force which attempts to
-    /// turn the motor.
+    /// The motor stops and then brakes, actively resisting any external force
+    /// which attempts to turn the motor.
     Brake,
-    /// The motor stops and then floats: an external force attempting to turn the motor is not met
-    /// with active resistance.
+    /// The motor stops and then floats: an external force attempting to turn
+    /// the motor is not met with active resistance.
     Float,
 }
 
@@ -320,33 +344,38 @@ enum_variant_into! {
 
 /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.RunMode.html>.
 ///
-/// The run mode of a motor controls how the motor interprets its parameter settings passed through
-/// power- and encoder-related methods. Some of these modes internally use `PIDcontrol` to achieve
-/// their function, while others do not. Those that do are referred to as "PID modes".
+/// The run mode of a motor controls how the motor interprets its parameter
+/// settings passed through power- and encoder-related methods. Some of these
+/// modes internally use `PIDcontrol` to achieve their function, while others do
+/// not. Those that do are referred to as "PID modes".
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[must_use]
 pub enum RunMode {
-    /// The motor is simply to run at whatever velocity is achieved by apply a particular power
-    /// level to the motor.
+    /// The motor is simply to run at whatever velocity is achieved by apply a
+    /// particular power level to the motor.
     RunWithoutEncoder,
-    /// The motor is to do its best to run at targeted velocity. An encoder must be affixed to the
-    /// motor in order to use this mode. This is a PID mode.
+    /// The motor is to do its best to run at targeted velocity. An encoder must
+    /// be affixed to the motor in order to use this mode. This is a PID
+    /// mode.
     RunUsingEncoder,
-    /// The motor is to attempt to rotate in whatever direction is necessary to cause the encoder
-    /// reading to advance or retreat from its current setting to the setting which has been
-    /// provided through the `set_target_position` method. An encoder must be affixed to this
+    /// The motor is to attempt to rotate in whatever direction is necessary to
+    /// cause the encoder reading to advance or retreat from its current
+    /// setting to the setting which has been provided through the
+    /// `set_target_position` method. An encoder must be affixed to this
     /// motor in order to use this mode. This is a PID mode.
     RunToPosition,
-    /// The motor is to set the current encoder position to zero. In contrast to `RunToPosition`,
-    /// the motor is not rotated in order to achieve this; rather, the current rotational
-    /// position of the motor is simply reinterpreted as the new zero value. However, as a side
-    /// effect of placing a motor in this mode, power is removed from the motor, causing it to
-    /// stop, though it is unspecified whether the motor enters brake or float mode. Further, it
-    /// should be noted that setting a motor to `StopAndResetEncoder` may or may not be a transient
-    /// state: motors connected to some motor controllers will remain in this mode until
-    /// explicitly transitioned to a different one, while motors connected to other motor
-    /// controllers will automatically transition to a different mode after the reset of the encoder
-    /// is complete.
+    /// The motor is to set the current encoder position to zero. In contrast to
+    /// `RunToPosition`, the motor is not rotated in order to achieve this;
+    /// rather, the current rotational position of the motor is simply
+    /// reinterpreted as the new zero value. However, as a side
+    /// effect of placing a motor in this mode, power is removed from the motor,
+    /// causing it to stop, though it is unspecified whether the motor
+    /// enters brake or float mode. Further, it should be noted that setting
+    /// a motor to `StopAndResetEncoder` may or may not be a transient
+    /// state: motors connected to some motor controllers will remain in this
+    /// mode until explicitly transitioned to a different one, while motors
+    /// connected to other motor controllers will automatically transition
+    /// to a different mode after the reset of the encoder is complete.
     StopAndResetEncoder,
 }
 
@@ -430,16 +459,19 @@ impl AngleUnit {
 
 /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/AngularVelocity.html>.
 ///
-/// Instances of `AngularVelocity` represent an instantaneous body-referenced 3D rotation rate.
+/// Instances of `AngularVelocity` represent an instantaneous body-referenced 3D
+/// rotation rate.
 ///
-/// The instantaneous rate of change of an Orientation, which is what we are representing here, has
-/// unexpected subtleties. As described in Section 9.3 of the MIT Kinematics Lecture below, the
-/// instantaneous body-referenced rotation rate angles are decoupled (their order does not matter)
-/// but their conversion into a corresponding instantaneous rate of change of a set of related Euler
-/// angles (ie: Orientation involves a non-obvious transformation on two of the rotation rates.
+/// The instantaneous rate of change of an Orientation, which is what we are
+/// representing here, has unexpected subtleties. As described in Section 9.3 of
+/// the MIT Kinematics Lecture below, the instantaneous body-referenced rotation
+/// rate angles are decoupled (their order does not matter) but their conversion
+/// into a corresponding instantaneous rate of change of a set of related Euler
+/// angles (ie: Orientation involves a non-obvious transformation on two of the
+/// rotation rates.
 ///
-/// The speeds are unnormalized angles, meaning they can be outside of the range -180..=180 if
-/// degrees or -π..=π if radians.
+/// The speeds are unnormalized angles, meaning they can be outside of the range
+/// -180..=180 if degrees or -π..=π if radians.
 #[derive(Clone, Copy, PartialEq)]
 #[must_use]
 #[allow(
@@ -567,31 +599,34 @@ impl Display for AngularVelocity {
     }
 }
 
-/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/external/navigation/YawPitchRollAngles.html>.
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/org/firstinspires/ftc/robotcore/external/navigation/YawPitchRollAngles.html>.
 ///
 /// A simplified view of the orientation of an object in 3D space.
 ///
-/// Yaw is side-to-side lateral rotation, where the object remains flat, but turns left and right.
-/// Sometimes yaw is also referred to as "heading".
+/// Yaw is side-to-side lateral rotation, where the object remains flat, but
+/// turns left and right. Sometimes yaw is also referred to as "heading".
 ///
-/// Pitch is front-to-back rotation, where the front of the object moves upwards while the rear of
-/// the object moves downwards, or vice versa.
+/// Pitch is front-to-back rotation, where the front of the object moves upwards
+/// while the rear of the object moves downwards, or vice versa.
 ///
-/// Roll is side-to-side tilt, where the left side of the object moves upwards while the right side
-/// of the object moves downwards, or vice versa.
+/// Roll is side-to-side tilt, where the left side of the object moves upwards
+/// while the right side of the object moves downwards, or vice versa.
 ///
 /// All angles are in the range of -180 degrees to 180 degrees.
 ///
-/// The angles are applied intrinsically, in the order of yaw, then pitch, then roll.
-/// "Intrinsically" means that the axes move along with the object as you perform the rotations. As
-/// an example using a robot, if the yaw is 30 degrees, the pitch is 40 degrees, and the roll is 10
-/// degrees, that means that you would reach the described orientation by first rotating the object
-/// 30 degrees counter-clockwise from the starting point, with all wheels continuing to touch the
-/// ground (rotation around the Z axis, as defined in the Robot Coordinate System). Then, you make
-/// your robot point 40 degrees upward (rotate it 40 degrees around the X axis, as defined in the
-/// Robot Coordinate System). Because the X axis moved with the robot, the pitch is not affected by
-/// the yaw value. Then from that position, the robot is tilted 10 degrees to the right, around the
-/// newly positioned Y axis, to produce the actual position of the robot.
+/// The angles are applied intrinsically, in the order of yaw, then pitch, then
+/// roll. "Intrinsically" means that the axes move along with the object as you
+/// perform the rotations. As an example using a robot, if the yaw is 30
+/// degrees, the pitch is 40 degrees, and the roll is 10 degrees, that means
+/// that you would reach the described orientation by first rotating the object
+/// 30 degrees counter-clockwise from the starting point, with all wheels
+/// continuing to touch the ground (rotation around the Z axis, as defined in
+/// the Robot Coordinate System). Then, you make your robot point 40 degrees
+/// upward (rotate it 40 degrees around the X axis, as defined in the
+/// Robot Coordinate System). Because the X axis moved with the robot, the pitch
+/// is not affected by the yaw value. Then from that position, the robot is
+/// tilted 10 degrees to the right, around the newly positioned Y axis, to
+/// produce the actual position of the robot.
 #[derive(Clone, Copy, PartialEq)]
 #[must_use]
 #[allow(
@@ -852,9 +887,9 @@ impl IntoJniObject for Rev9AxisImuOrientationOnRobot {
         .unwrap()
     }
     fn from_jni_object(_vm: &JavaVM, _obj: Global<JObject<'static>>) -> Self {
-        // What needs to be done to convert it is to extract quaternion of the IMU from the class
-        // that Rev9AxisImuOrientationOnRobot inherits from, RevImuOrientationOnRobot. (see
-        // https://github.com/OpenFTC/Extracted-RC). Then match on it or something to get the two
+        // What needs to be done to convert it is to extract quaternion of the IMU from
+        // the class that Rev9AxisImuOrientationOnRobot inherits from,
+        // RevImuOrientationOnRobot. (see https://github.com/OpenFTC/Extracted-RC). Then match on it or something to get the two
         // orientations we need.
 
         unimplemented!(
@@ -947,7 +982,8 @@ enum_variant_into! {
 pub struct HardwareDevice {
     /// The environment.
     vm: JavaVM,
-    /// The actual device object. Should be com/qualcomm/robotcore/hardware/HardwareDevice.
+    /// The actual device object. Should be
+    /// com/qualcomm/robotcore/hardware/HardwareDevice.
     hardware_device: Global<JObject<'static>>,
 }
 
@@ -987,9 +1023,10 @@ impl HardwareDevice {
             })
             .unwrap()
     }
-    /// Returns a string suitable for display to the user as to the type of device. Note that this
-    /// is a device-type-specific name; it has nothing to do with the name by which a user might
-    /// have configured the device in a robot configuration.
+    /// Returns a string suitable for display to the user as to the type of
+    /// device. Note that this is a device-type-specific name; it has
+    /// nothing to do with the name by which a user might have configured
+    /// the device in a robot configuration.
     #[must_use]
     #[doc(alias = "getDeviceName")]
     pub fn device_name(&self) -> String {
@@ -999,7 +1036,7 @@ impl HardwareDevice {
                     env env,
                     self.hardware_device,
                     "getDeviceName",
-                    format!("()Ljava/lang/String;"),
+                    "()Ljava/lang/String;",
                     []
                 )?
                 .l()?;
@@ -1022,7 +1059,7 @@ impl HardwareDevice {
                     env env,
                     self.hardware_device,
                     "getConnectionInfo",
-                    format!("()Ljava/lang/String;"),
+                    "()Ljava/lang/String;",
                     []
                 )?
                 .l()?;
@@ -1035,8 +1072,9 @@ impl HardwareDevice {
             })
             .unwrap()
     }
-    /// Resets the device's configuration to that which is expected at the beginning of an `OpMode`.
-    /// For example, motors will reset the their direction to 'forward'.
+    /// Resets the device's configuration to that which is expected at the
+    /// beginning of an `OpMode`. For example, motors will reset the their
+    /// direction to 'forward'.
     #[doc(alias = "resetDeviceConfigurationForOpMode")]
     pub fn reset_device_config(&self) {
         call_method!(void self, self.hardware_device, "resetDeviceConfigurationForOpMode", "()V", []);
@@ -1045,5 +1083,127 @@ impl HardwareDevice {
     #[doc(alias = "close")]
     pub fn disable(&self) {
         call_method!(void self, self.hardware_device, "close", "()V", []);
+    }
+}
+
+/// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/org/firstinspires/ftc/robotcore/external/navigation/Pose3D.html>.
+///
+/// `Pose3D` represents the position and orientation of an object in 3D space.
+#[derive(Clone, Debug, PartialEq)]
+#[must_use]
+pub struct Pose3D {
+    /// In millimeters.
+    pub pos: Vec3,
+    /// A 3D orientation. The axis mapping is defined by the code that
+    /// instanciates this or the Java class this is based on.
+    pub orientation: YawPitchRollAngles,
+}
+
+impl IntoJniObject for Vec3 {
+    const JAVA_CLASS: &'static str = "org.firstinspires.ftc.robotcore.external.navigation.Position";
+    const JNI_CLASS: &'static str = "org/firstinspires/ftc/robotcore/external/navigation/Position";
+
+    fn from_jni_object(vm: &JavaVM, obj: Global<JObject<'static>>) -> Self {
+        vm.attach_current_thread(|env| {
+            let unit_class = env.find_class(JNIString::new("org/firstinspires/ftc/robotcore/external/navigation/DistanceUnit"))?;
+            let unit_mm = env.get_static_field(unit_class, jni_str!("MM"), jni_sig!("Lorg/firstinspires/ftc/robotcore/external/navigation/DistanceUnit;"))?;
+
+            let obj = call_method!(env env, obj, "toUnit", "(Lorg/firstinspires/ftc/robotcore/external/navigation/DistanceUnit;)Lorg/firstinspires/ftc/robotcore/external/navigation/Position;", [&unit_mm])?.l()?;
+
+            jni::errors::Result::Ok(Vec3 {
+                x: get_field!(double env, obj, "x") as f32,
+                y: get_field!(double env, obj, "y") as f32,
+                z: get_field!(double env, obj, "z") as f32,
+            })
+        }).unwrap()
+    }
+    fn into_jni_object<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
+        let unit_class = env
+            .find_class(jni_str!(
+                "org/firstinspires/ftc/robotcore/external/navigation/DistanceUnit",
+            ))
+            .unwrap();
+        let unit_mm = env
+            .get_static_field(
+                unit_class,
+                jni_str!("MM"),
+                jni_sig!("Lorg/firstinspires/ftc/robotcore/external/navigation/DistanceUnit;"),
+            )
+            .unwrap();
+
+        let class = env.find_class(JNIString::new(Self::JNI_CLASS)).unwrap();
+        env.new_object(
+            class,
+            jni_sig!(
+                "(Lorg/firstinspires/ftc/robotcore/external/navigation/DistanceUnit;DDDJ)Lorg/\
+                 firstinspires/ftc/robotcore/external/navigation/Position;"
+            ),
+            &[
+                (&unit_mm).into(),
+                f64::from(self.x).into(),
+                f64::from(self.y).into(),
+                f64::from(self.z).into(),
+                0i64.into(),
+            ],
+        )
+        .unwrap()
+    }
+}
+
+impl IntoJniObject for Pose3D {
+    const JAVA_CLASS: &'static str = "org.firstinspires.ftc.robotcore.external.navigation.Pose3D";
+    const JNI_CLASS: &'static str = "org/firstinspires/ftc/robotcore/external/navigation/Pose3D";
+    fn from_jni_object(vm: &JavaVM, obj: Global<JObject<'static>>) -> Self {
+        let (pos, orientation) = vm
+            .attach_current_thread(|env| {
+                let pos = call_method!(
+                    env env,
+                    obj,
+                    "getPosition",
+                    "()Lorg/firstinspires/ftc/robotcore/external/navigation/Position;",
+                    []
+                )?
+                .l()?;
+
+                let orientation = call_method!(
+                    env env,
+                    obj,
+                    "getOrientation",
+                    "()Lorg/firstinspires/ftc/robotcore/external/navigation/YawPitchRollAngles;",
+                    []
+                )?
+                .l()?;
+
+                jni::errors::Result::Ok((
+                    env.new_global_ref(pos)?,
+                    env.new_global_ref(orientation)?,
+                ))
+            })
+            .unwrap();
+
+        Self {
+            pos: Vec3::from_jni_object(vm, pos),
+            orientation: YawPitchRollAngles::from_jni_object(vm, orientation),
+        }
+    }
+    fn into_jni_object<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
+        let class = env
+            .find_class(jni_str!(
+                "org/firstinspires/ftc/robotcore/external/navigation/Pose3D"
+            ))
+            .unwrap();
+        let pos = self.pos.into_jni_object(env);
+        let orientation = self.orientation.into_jni_object(env);
+
+        env.new_object(
+            class,
+            jni_sig!(
+                "(Lorg/firstinspires/ftc/robotcore/external/navigation/Position;Lorg/\
+                 firstinspires/ftc/robotcore/external/navigation/YawPitchRollAngles;)Lorg/\
+                 firstinspires/ftc/robotcore/external/navigation/Pose3D;"
+            ),
+            &[(&pos).into(), (&orientation).into()],
+        )
+        .unwrap()
     }
 }

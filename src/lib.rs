@@ -6,20 +6,28 @@ use std::{
     fmt::Debug,
     hash::Hash,
     marker::PhantomData,
-    sync::{Arc, LazyLock, Mutex, atomic::AtomicI64},
+    sync::{Arc, LazyLock, atomic::AtomicI64},
     time::Duration,
 };
+use parking_lot::Mutex;
 
 #[cfg(feature = "proc-macro")]
 pub use ftc_rust_proc::ftc;
 pub use jni;
-use jni::{jni_sig, jni_str, objects::JObject, refs::Global, strings::JNIString, vm::JavaVM};
+use jni::{
+    elements::ReleaseMode,
+    jni_sig, jni_str,
+    objects::{JList, JObject},
+    refs::{Global, Reference},
+    strings::JNIString,
+    vm::JavaVM,
+};
 pub use log;
-use log::{trace, warn};
+use log::{info, trace, warn};
 
 use crate::{
     command::{Command, SCHEDULER},
-    hardware::Hardware,
+    hardware::{Hardware, IntoJniObject},
 };
 
 pub mod command;
@@ -33,7 +41,8 @@ mod macros;
 pub struct Telemetry {
     /// The environment.
     vm: JavaVM,
-    /// The actual telemetry object. Should be org/firstinspires/ftc/robotcore/external/Telemetry.
+    /// The actual telemetry object. Should be
+    /// org/firstinspires/ftc/robotcore/external/Telemetry.
     telemetry: Global<JObject<'static>>,
 }
 
@@ -44,11 +53,18 @@ impl Debug for Telemetry {
 }
 
 impl Telemetry {
-    /// Adds an item to the end if the telemetry being built for driver station display. The caption
-    /// and value are shown on the driver station separated by the caption value separator. The
-    /// item is removed if `clear` or `clear_all` is called.
+    /// Adds an item to the end if the telemetry being built for driver station
+    /// display. The caption and value are shown on the driver station
+    /// separated by the caption value separator. The item is removed if
+    /// `clear` or `clear_all` is called.
     #[allow(clippy::needless_pass_by_value)]
     pub fn add_data(&self, caption: impl ToString, value: impl ToString) {
+        info!(
+            "new telemetry data posted: {} - {}",
+            caption.to_string(),
+            value.to_string()
+        );
+
         self.vm
             .attach_current_thread(|env| {
                 let caption = new_string!(env env, caption.to_string())?;
@@ -65,11 +81,14 @@ impl Telemetry {
             })
             .unwrap();
     }
-    /// Sends the receiver `Telemetry` to the driver station if more than the transmission interval
-    /// has elapsed since the last transmission, or schedules the transmission of the receiver
-    /// should no subsequent `Telemetry` state be scheduled for transmission before the
+    /// Sends the receiver `Telemetry` to the driver station if more than the
+    /// transmission interval has elapsed since the last transmission, or
+    /// schedules the transmission of the receiver should no subsequent
+    /// `Telemetry` state be scheduled for transmission before the
     /// transmission interval expires.
     pub fn update(&self) {
+        trace!("updating telemetry");
+
         call_method!(
             void self,
             self.telemetry,
@@ -80,6 +99,7 @@ impl Telemetry {
     }
     /// Removes all items from the receiver whose value is not to be retained.
     pub fn clear(&self) {
+        trace!("clearing telemetry");
         call_method!(
             void self,
             self.telemetry,
@@ -90,6 +110,7 @@ impl Telemetry {
     }
     /// Removes all items, lines, and actions from the receiver.
     pub fn clear_all(&self) {
+        trace!("clearing all telemetry");
         call_method!(
             void self,
             self.telemetry,
@@ -212,8 +233,8 @@ pub enum PressEdge {
     WhileReleased,
 }
 
-/// The command used for button presses. Registered by the `Gamepad::on_*` and `Gamepad::while_`
-/// functions.
+/// The command used for button presses. Registered by the `Gamepad::on_*` and
+/// `Gamepad::while_` functions.
 #[derive(Debug)]
 pub struct ButtonCommand<F: FnMut(PressEdge) + 'static + Send + Sync> {
     /// The gamepad to check.
@@ -253,8 +274,8 @@ pub struct StickCommand<F: FnMut(f32) + 'static + Send + Sync> {
     pub gamepad: WhichGamepad,
     /// The stick to check.
     pub stick: Stick,
-    /// The threshold it must meet to activate. If negative, it must be less than this, if positive
-    /// it must be greater.
+    /// The threshold it must meet to activate. If negative, it must be less
+    /// than this, if positive it must be greater.
     pub threshold: f32,
     /// If false, the absolute value is taken of the stick first.
     pub abs: bool,
@@ -441,7 +462,8 @@ impl Gamepad {
     pub fn is_released(&self, button: Button) -> bool {
         !self.is_pressed(button)
     }
-    /// Execute the provided function when the provided edge of the provided button occurs.
+    /// Execute the provided function when the provided edge of the provided
+    /// button occurs.
     pub fn execute_on(
         &self,
         button: Button,
@@ -456,7 +478,8 @@ impl Gamepad {
         })
         .schedule();
     }
-    /// Execute the provided function when the provided edge of the provided stick occurs.
+    /// Execute the provided function when the provided edge of the provided
+    /// stick occurs.
     pub fn execute_on_stick(
         &self,
         stick: Stick,
@@ -533,7 +556,8 @@ impl Gamepad {
         pub button ps Ps
     );
 
-    /// Boolean value of if the left trigger is past `DEFAULT_TRIGGER_THRESHOLD`.
+    /// Boolean value of if the left trigger is past
+    /// `DEFAULT_TRIGGER_THRESHOLD`.
     #[must_use]
     pub fn left_trigger_pressed(&self) -> bool {
         self.vm
@@ -615,7 +639,8 @@ impl Gamepad {
     pub fn while_release_left_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
         self.execute_on_left_trigger_pressed(f, PressEdge::WhileReleased);
     }
-    /// Boolean value of if the right trigger is past `DEFAULT_TRIGGER_THRESHOLD`.
+    /// Boolean value of if the right trigger is past
+    /// `DEFAULT_TRIGGER_THRESHOLD`.
     #[must_use]
     pub fn right_trigger_pressed(&self) -> bool {
         self.vm
@@ -651,7 +676,8 @@ impl Gamepad {
                 .unwrap()
         }
     }
-    ///Checks if `right_trigger` was released since the last call of this method
+    ///Checks if `right_trigger` was released since the last call of this
+    /// method
     #[must_use]
     pub fn right_trigger_was_released(&self) -> bool {
         {
@@ -726,9 +752,9 @@ impl Gamepad {
     );
 }
 
-/// A context used for accessing the Java runtime. Note that cloning is somewhat costly from
-/// creating a new JNI global reference to the `this` object, so prefer passing around references
-/// rather than owned contexts.
+/// A context used for accessing the Java runtime. Note that cloning is somewhat
+/// costly from creating a new JNI global reference to the `this` object, so
+/// prefer passing around references rather than owned contexts.
 pub struct FtcContext {
     /// The java environment.
     vm: JavaVM,
@@ -813,13 +839,13 @@ impl FtcContext {
         }
         out
     }
-    /// Call a method with the state of this context. Panics if the associated state isn't the
-    /// provided type.
+    /// Call a method with the state of this context. Panics if the associated
+    /// state isn't the provided type.
     pub fn with_state<State: Any + Default + Send + Sync + 'static, R>(
         &self,
         f: impl FnOnce(&mut State) -> R,
     ) -> R {
-        let mut lock = STATE.lock().unwrap();
+        let mut lock = STATE.lock();
         let state = lock
             .entry(self.id())
             .or_insert_with(|| Box::new(State::default()))
@@ -844,7 +870,7 @@ impl FtcContext {
     /// Whether the currently running opmode is iterative.
     #[must_use]
     pub fn is_iterative(&self) -> bool {
-        ITERATIVE_CONTEXTS.lock().unwrap().contains_key(&self.id())
+        ITERATIVE_CONTEXTS.lock().contains_key(&self.id())
     }
     /// Whether the currently running opmode is linear.
     #[must_use]
@@ -857,12 +883,10 @@ impl FtcContext {
         if self.is_iterative() {
             ITERATIVE_CONTEXTS
                 .lock()
-                .unwrap()
                 .get(&self.id())
                 .unwrap()
                 .inner
                 .lock()
-                .unwrap()
                 .stage
         } else if self.running() {
             OpModeStage::Running
@@ -978,15 +1002,15 @@ impl FtcContext {
     /// Run the scheduler.
     #[doc(hidden)]
     pub fn run_scheduler(&self) {
-        SCHEDULER.write().unwrap().run(self.clone());
+        SCHEDULER.write().run(self.clone());
     }
     /// Run the scheduler.
     #[doc(hidden)]
     pub fn stop_scheduler(&self) {
-        SCHEDULER.write().unwrap().stop();
+        SCHEDULER.write().stop();
     }
-    /// Returns whether the `OpMode` is still running. If not (and a linear opmode), the op mode
-    /// should exit as fast as possible.
+    /// Returns whether the `OpMode` is still running. If not (and a linear
+    /// opmode), the op mode should exit as fast as possible.
     #[doc(alias = "opModeIsActive")]
     #[must_use]
     pub fn running(&self) -> bool {
@@ -1007,13 +1031,15 @@ impl FtcContext {
     pub fn reset_runtime(&self) {
         call_method!(void self, self.this, "resetRuntime", "()V", []);
     }
-    /// Terminate the opmode NOW. Does not wait for anything. This function does not return.
+    /// Terminate the opmode NOW. Does not wait for anything. This function does
+    /// not return.
     #[doc(alias = "terminateOpModeNow")]
     pub fn terminate_opmode(&self) -> ! {
         call_method!(void self, self.this, "terminateOpModeNow", "()V", []);
         unreachable!("terminateOpModeNow did not diverge");
     }
-    /// Terminate the opmode, as if the driver had pressed the stop button on the controller.
+    /// Terminate the opmode, as if the driver had pressed the stop button on
+    /// the controller.
     #[doc(alias = "requestOpModeStop")]
     pub fn request_stop(&self) {
         call_method!(void self, self.this, "requestOpModeStop", "()V", []);
@@ -1031,7 +1057,7 @@ pub enum OpModeStage {
 }
 
 /// The actual contexts. Used by [`IterativeContext::get_for`].
-static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<i64, IterativeContext<()>>>> =
+static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<i64, SyncSendIterativeContext>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The type of the iterative callbacks used in [`InnerIterativeContext`].
@@ -1075,10 +1101,15 @@ where
 {
     /// The reference-counted actual data.
     inner: Arc<Mutex<InnerIterativeContext>>,
-    /// Make it difficult for someone to store this in a static or similar as that is something
-    /// that you really should not do. Wish Rust allowed this to have a custom message.
+    /// Make it difficult for someone to store this in a static or similar as
+    /// that is something that you really should not do. Wish Rust allowed
+    /// this to have a custom message.
     _phantom: PhantomData<Phantom>,
 }
+
+/// An iterative context that is Send + Sync. Usually not what you want; see
+/// [`IterativeContext::to_send_sync`] for more info.
+pub type SyncSendIterativeContext = IterativeContext<()>;
 
 impl Debug for IterativeContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1086,7 +1117,7 @@ impl Debug for IterativeContext {
     }
 }
 
-impl IterativeContext<()> {
+impl SyncSendIterativeContext {
     /// Convert this back to a regular [`IterativeContext`].
     #[must_use]
     pub fn to_normal(self) -> IterativeContext<*const ()> {
@@ -1098,16 +1129,18 @@ impl IterativeContext<()> {
 }
 
 impl IterativeContext<*const ()> {
-    /// DO NOT USE THIS IF YOU JUST WANT TO DO REGULAR STUFF (access devices, telemetry, gamepads,
-    /// etc)! [`IterativeContext`] is for registering callbacks in an iterative opmode, and you
-    /// almost definitely just want to register a callback and then use the passed [`FtcContext`].
+    /// DO NOT USE THIS IF YOU JUST WANT TO DO REGULAR STUFF (access devices,
+    /// telemetry, gamepads, etc)! [`IterativeContext`] is for registering
+    /// callbacks in an iterative opmode, and you almost definitely just
+    /// want to register a callback and then use the passed [`FtcContext`].
     /// But there are some scenarios when you might want to use this.
     ///
-    /// Convert this to a version of the type that is Send + Sync. Ninety-nine percent of the time
-    /// this is not what you want! This is basically only for power users if you really want to
-    /// register more callbacks during the lifecycle of a iterative opmode.
+    /// Convert this to a version of the type that is Send + Sync. Ninety-nine
+    /// percent of the time this is not what you want! This is basically
+    /// just an escape hatch if you really want to register more callbacks
+    /// during the lifecycle of a iterative opmode.
     #[must_use]
-    pub fn to_send_sync(self) -> IterativeContext<()> {
+    pub fn to_send_sync(self) -> SyncSendIterativeContext {
         IterativeContext {
             inner: self.inner,
             _phantom: PhantomData,
@@ -1118,7 +1151,7 @@ impl IterativeContext<*const ()> {
         let this = env.new_local_ref(this).unwrap();
 
         let id = FtcContext::new_no_log(env, this).id();
-        match ITERATIVE_CONTEXTS.lock().unwrap().entry(id) {
+        match ITERATIVE_CONTEXTS.lock().entry(id) {
             std::collections::hash_map::Entry::Occupied(occupied_entry) => {
                 occupied_entry.get().clone()
             }
@@ -1134,7 +1167,7 @@ impl IterativeContext<*const ()> {
     /// Register a new callback. Does NOT overwrite any previous callbacks
     /// and just adds another.
     pub fn register(&self, at: IterativeCallback, f: impl FnMut(&FtcContext) + Send + 'static) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         let callbacks = match at {
             IterativeCallback::Init => &mut inner.init,
             IterativeCallback::InitLoop => &mut inner.init_loop,
@@ -1144,79 +1177,80 @@ impl IterativeContext<*const ()> {
         };
         callbacks.push(Box::new(f));
     }
-    /// Register a new callback for the `init` function. Does NOT overwrite any previous callbacks
-    /// and just adds another.
+    /// Register a new callback for the `init` function. Does NOT overwrite any
+    /// previous callbacks and just adds another.
     ///
-    /// Prefer putting the body of a loop (and using [`FtcContext::with_state`] for anything
-    /// persistent) in [`init_loop`](IterativeContext::init_loop).
+    /// Prefer putting the body of a loop (and using [`FtcContext::with_state`]
+    /// for anything persistent) in
+    /// [`init_loop`](IterativeContext::init_loop).
     pub fn init(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
         self.register(IterativeCallback::Init, f);
     }
-    /// Register a new callback for the `init_loop` function. Does NOT overwrite any previous
-    /// callbacks and just adds another.
+    /// Register a new callback for the `init_loop` function. Does NOT overwrite
+    /// any previous callbacks and just adds another.
     ///
-    /// This callback should not have any internal loops/unbounded recursion as it is called in a
-    /// loop by the runtime itself.
+    /// This callback should not have any internal loops/unbounded recursion as
+    /// it is called in a loop by the runtime itself.
     pub fn init_loop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
         self.register(IterativeCallback::InitLoop, f);
     }
-    /// Register a new callback for the `start` function. Does NOT overwrite any previous callbacks
-    /// and just adds another.
+    /// Register a new callback for the `start` function. Does NOT overwrite any
+    /// previous callbacks and just adds another.
     ///
-    /// Prefer putting the body of a loop (and using [`FtcContext::with_state`] for anything
-    /// persistent) in [`loop`](IterativeContext::r#loop).
+    /// Prefer putting the body of a loop (and using [`FtcContext::with_state`]
+    /// for anything persistent) in [`loop`](IterativeContext::r#loop).
     pub fn start(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
         self.register(IterativeCallback::Start, f);
     }
-    /// Register a new callback for the `loop` function. Does NOT overwrite any previous callbacks
-    /// and just adds another.
+    /// Register a new callback for the `loop` function. Does NOT overwrite any
+    /// previous callbacks and just adds another.
     ///
-    /// This callback should not have any internal loops/unbounded recursion as it is called in a
-    /// loop by the runtime itself.
+    /// This callback should not have any internal loops/unbounded recursion as
+    /// it is called in a loop by the runtime itself.
     pub fn r#loop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
         self.register(IterativeCallback::Loop, f);
     }
-    /// Register a new callback for the `stop` function. Does NOT overwrite any previous callbacks
-    /// and just adds another.
+    /// Register a new callback for the `stop` function. Does NOT overwrite any
+    /// previous callbacks and just adds another.
     ///
-    /// This should have minimal code needed for basic cleanup as it will be terminated by the
-    /// runtime if it takes too long.
+    /// This should have minimal code needed for basic cleanup as it will be
+    /// terminated by the runtime if it takes too long.
     pub fn stop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
         self.register(IterativeCallback::Stop, f);
     }
 
     #[doc(hidden)]
     pub fn call_init(&mut self, ctx: &FtcContext) {
-        self.inner.lock().unwrap().stage = OpModeStage::Init;
-        for f in &mut self.inner.lock().unwrap().init {
+        self.inner.lock().stage = OpModeStage::Init;
+        for f in &mut self.inner.lock().init {
             f(ctx);
         }
     }
     #[doc(hidden)]
     pub fn call_init_loop(&mut self, ctx: &FtcContext) {
-        self.inner.lock().unwrap().stage = OpModeStage::Init;
-        for f in &mut self.inner.lock().unwrap().init_loop {
+        self.inner.lock().stage = OpModeStage::Init;
+        for f in &mut self.inner.lock().init_loop {
             f(ctx);
         }
     }
     #[doc(hidden)]
     pub fn call_start(&mut self, ctx: &FtcContext) {
-        self.inner.lock().unwrap().stage = OpModeStage::Running;
-        for f in &mut self.inner.lock().unwrap().start {
+        self.inner.lock().stage = OpModeStage::Running;
+        for f in &mut self.inner.lock().start {
             f(ctx);
         }
     }
     #[doc(hidden)]
     pub fn call_loop(&mut self, ctx: &FtcContext) {
-        self.inner.lock().unwrap().stage = OpModeStage::Running;
-        for f in &mut self.inner.lock().unwrap().r#loop {
+        self.inner.lock().stage = OpModeStage::Running;
+        for f in &mut self.inner.lock().r#loop {
             f(ctx);
         }
     }
     #[doc(hidden)]
     pub fn call_stop(&mut self, ctx: &FtcContext) {
-        self.inner.lock().unwrap().stage = OpModeStage::Stop;
-        for f in &mut self.inner.lock().unwrap().stop {
+        self.inner.lock().stage = OpModeStage::Stop;
+        for f in &mut self.inner.lock().stop {
             f(ctx);
         }
     }
@@ -1224,7 +1258,8 @@ impl IterativeContext<*const ()> {
 
 pub mod policy;
 
-/// Better `panic!` that outputs a message through log since panics don't really work with the JNI
+/// Better `panic!` that outputs a message through log since panics don't really
+/// work with the JNI
 #[macro_export]
 macro_rules! panic {
     () => {
@@ -1239,8 +1274,8 @@ macro_rules! panic {
     };
 }
 
-/// Better `unimplemented!` that outputs a message through log since panics don't really work with
-/// the JNI
+/// Better `unimplemented!` that outputs a message through log since panics
+/// don't really work with the JNI
 #[macro_export]
 macro_rules! unimplemented {
     () => {
@@ -1251,7 +1286,8 @@ macro_rules! unimplemented {
     };
 }
 
-/// Better `todo!` that outputs a message through log since panics don't really work with the JNI
+/// Better `todo!` that outputs a message through log since panics don't really
+/// work with the JNI
 #[macro_export]
 macro_rules! todo {
     () => {
@@ -1262,8 +1298,8 @@ macro_rules! todo {
     };
 }
 
-/// Better `unreachable!` that outputs a message through log since panics don't really work with the
-/// JNI
+/// Better `unreachable!` that outputs a message through log since panics don't
+/// really work with the JNI
 #[macro_export]
 macro_rules! unreachable {
     () => {
@@ -1274,7 +1310,8 @@ macro_rules! unreachable {
     };
 }
 
-/// Better `assert!` that outputs a message through log since panics don't really work with the JNI
+/// Better `assert!` that outputs a message through log since panics don't
+/// really work with the JNI
 #[macro_export]
 macro_rules! assert {
     ($condition:expr $(,)?) => {
@@ -1295,8 +1332,8 @@ macro_rules! assert {
     };
 }
 
-/// Better `assert_eq!` that outputs a message through log since panics don't really work with
-/// the JNI
+/// Better `assert_eq!` that outputs a message through log since panics don't
+/// really work with the JNI
 #[macro_export]
 macro_rules! assert_eq {
     ($val1:expr, $val2:expr $(,)?) => {
@@ -1307,8 +1344,8 @@ macro_rules! assert_eq {
     };
 }
 
-/// Better `assert_ne!` that outputs a message through log since panics don't really work with the
-/// JNI
+/// Better `assert_ne!` that outputs a message through log since panics don't
+/// really work with the JNI
 #[macro_export]
 macro_rules! assert_ne {
     ($val1:expr, $val2:expr $(,)?) => {
@@ -1319,8 +1356,8 @@ macro_rules! assert_ne {
     };
 }
 
-/// Better `assert_matches!` that outputs a message through log since panics don't really work with
-/// the JNI
+/// Better `assert_matches!` that outputs a message through log since panics
+/// don't really work with the JNI
 #[macro_export]
 macro_rules! assert_matches {
     ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
@@ -1331,8 +1368,8 @@ macro_rules! assert_matches {
     };
 }
 
-/// Better `debug_assert!` that outputs a message through log since panics don't really work with
-/// the JNI
+/// Better `debug_assert!` that outputs a message through log since panics don't
+/// really work with the JNI
 #[macro_export]
 macro_rules! debug_assert {
     ($condition:expr $(,)?) => {
@@ -1347,8 +1384,8 @@ macro_rules! debug_assert {
     };
 }
 
-/// Better `debug_assert_eq!` that outputs a message through log since panics don't really work with
-/// the JNI
+/// Better `debug_assert_eq!` that outputs a message through log since panics
+/// don't really work with the JNI
 #[macro_export]
 macro_rules! debug_assert_eq {
     ($val1:expr, $val2:expr $(,)?) => {
@@ -1363,8 +1400,8 @@ macro_rules! debug_assert_eq {
     };
 }
 
-/// Better `debug_assert_ne!` that outputs a message through log since panics don't really work with
-/// the JNI
+/// Better `debug_assert_ne!` that outputs a message through log since panics
+/// don't really work with the JNI
 #[macro_export]
 macro_rules! debug_assert_ne {
     ($val1:expr, $val2:expr $(,)?) => {
@@ -1379,8 +1416,8 @@ macro_rules! debug_assert_ne {
     };
 }
 
-/// Better `assert_matches!` that outputs a message through log since panics don't really work with
-/// the JNI
+/// Better `assert_matches!` that outputs a message through log since panics
+/// don't really work with the JNI
 #[macro_export]
 macro_rules! debug_assert_matches {
     ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
@@ -1393,4 +1430,45 @@ macro_rules! debug_assert_matches {
             $crate::assert!(matches!($expression, $pattern $(if $guard)?), $($tt)+);
         }
     };
+}
+
+/// Make a `Vec<T>` where T is a JNI object from a `JList`.
+///
+/// # Errors
+/// If making a global reference fails, if the passed object isn't a list, if
+/// making a `JIterator` doesn't work.
+pub fn jlist_map<'any_local, T: IntoJniObject>(
+    vm: &JavaVM,
+    list: impl Reference + AsRef<JObject<'any_local>> + Into<JObject<'any_local>>,
+) -> jni::errors::Result<Vec<T>> {
+    vm.attach_current_thread(|env| {
+        let list = JList::cast_local(env, list)?.iter(env)?;
+        let mut out = Vec::new();
+
+        while let Some(v) = list.next(env)? {
+            out.push(T::from_jni_object(vm, env.new_global_ref(v)?));
+        }
+        Ok(out)
+    })
+}
+
+/// Make a `Vec<f64>` from a `JList`.
+///
+/// # Errors
+/// If making a global reference fails, if the passed object isn't a list, if
+/// making a `JIterator` doesn't work.
+pub fn jlist_f64<'any_local>(
+    vm: &JavaVM,
+    list: impl Reference + AsRef<JObject<'any_local>> + Into<JObject<'any_local>>,
+) -> jni::errors::Result<Vec<f64>> {
+    vm.attach_current_thread(|env| {
+        let list = jni::objects::JDoubleArray::cast_local(env, list)?;
+        let elements = unsafe { list.get_elements(env, ReleaseMode::NoCopyBack)? };
+        let mut out = Vec::new();
+
+        for i in 0..list.len(env)? {
+            out.push(*elements.get(i).unwrap());
+        }
+        Ok(out)
+    })
 }

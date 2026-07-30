@@ -5,10 +5,8 @@ use std::ops::RangeBounds;
 use jni::signature::RuntimeMethodSignature;
 use log::trace;
 
-use crate::{debug_assert, debug_assert_ne};
-
 use crate::{
-    call_method, call_method_device,
+    call_method, call_method_device, debug_assert, debug_assert_ne,
     hardware::{
         AngularVelocity, Direction, IntoJniObject as _, Rev9AxisImuOrientationOnRobot, RunMode,
         YawPitchRollAngles, ZeroPowerBehavior, get_class,
@@ -133,13 +131,15 @@ impl DcMotor {
         Direction::from_jni_object_dcmotor(self.vm(), res)
     }
 
-    /// Sets the power level of the motor, expressed as a fraction of the maximum possible power /
-    /// speed supported according to the run mode in which the motor is operating.
+    /// Sets the power level of the motor, expressed as a fraction of the
+    /// maximum possible power / speed supported according to the run mode
+    /// in which the motor is operating.
     ///
-    /// See [`set_zero_power_behavior`](DcMotor::set_zero_power_behavior) for what happens when zero
-    /// power is applied.
+    /// See [`set_zero_power_behavior`](DcMotor::set_zero_power_behavior) for
+    /// what happens when zero power is applied.
     ///
-    /// In debug builds, setting this outside the range of -1.0..=1.0 will panic.
+    /// In debug builds, setting this outside the range of -1.0..=1.0 will
+    /// panic.
     #[doc(alias = "setPower")]
     pub fn set_power(&self, power: f64) {
         debug_assert!(
@@ -178,7 +178,8 @@ impl DcMotor {
             .unwrap();
     }
 
-    /// Returns the current behavior of the motor were a power level of zero to be applied.
+    /// Returns the current behavior of the motor were a power level of zero to
+    /// be applied.
     #[doc(alias = "getZeroPowerBehavior")]
     pub fn zero_power_behavior(&self) -> ZeroPowerBehavior {
         let res = call_method_device!(
@@ -191,15 +192,18 @@ impl DcMotor {
         ZeroPowerBehavior::from_jni_object(self.vm(), res)
     }
 
-    /// Sets the desired encoder target position to which the motor should advance or retreat and
-    /// then actively hold there at. This behavior is similar to the operation of a servo. The
-    /// maximum speed at which this advance or retreat occurs is governed by the power level
-    /// currently set on the motor. While the motor is advancing or retreating to the desired
-    /// target position, [`DcMotor::is_busy`] will return true.
+    /// Sets the desired encoder target position to which the motor should
+    /// advance or retreat and then actively hold there at. This behavior is
+    /// similar to the operation of a servo. The maximum speed at which this
+    /// advance or retreat occurs is governed by the power level
+    /// currently set on the motor. While the motor is advancing or retreating
+    /// to the desired target position, [`DcMotor::is_busy`] will return
+    /// true.
     ///
-    /// Note that adjustment to a target position is only effective when the motor is in
-    /// [`RunMode::RunToPosition`]. Note further that, clearly, the motor must be equipped with
-    /// an encoder in order for this mode to function properly.
+    /// Note that adjustment to a target position is only effective when the
+    /// motor is in [`RunMode::RunToPosition`]. Note further that, clearly,
+    /// the motor must be equipped with an encoder in order for this mode to
+    /// function properly.
     #[doc(alias = "setTargetPosition")]
     pub fn set_target_position(&self, target_pos: i32) {
         call_method_device!(void self, self.object(), "setTargetPosition", "(I)V", [target_pos]);
@@ -213,7 +217,8 @@ impl DcMotor {
             [])
     }
 
-    /// Returns true if the motor is currently advancing or retreating to a target position.
+    /// Returns true if the motor is currently advancing or retreating to a
+    /// target position.
     #[doc(alias = "isBusy")]
     #[must_use]
     pub fn busy(&self) -> bool {
@@ -221,9 +226,10 @@ impl DcMotor {
             [])
     }
 
-    /// Returns the current reading of the encoder for this motor. The units for this reading,
-    /// that is, the number of ticks per revolution, are specific to the motor/encoder in question,
-    /// and thus are not specified here.
+    /// Returns the current reading of the encoder for this motor. The units for
+    /// this reading, that is, the number of ticks per revolution, are
+    /// specific to the motor/encoder in question, and thus are not
+    /// specified here.
     #[doc(alias = "getCurrentPosition")]
     #[must_use]
     pub fn current_position(&self) -> i32 {
@@ -249,7 +255,8 @@ impl DcMotor {
             .unwrap();
     }
 
-    /// Returns the current behavior of the motor were a power level of zero to be applied.
+    /// Returns the current behavior of the motor were a power level of zero to
+    /// be applied.
     #[doc(alias = "getMode")]
     pub fn mode(&self) -> RunMode {
         let res = call_method_device!(
@@ -291,7 +298,8 @@ impl Servo {
             .unwrap();
     }
 
-    /// Returns the current logical direction in which this servo is set as operating.
+    /// Returns the current logical direction in which this servo is set as
+    /// operating.
     #[doc(alias = "getDirection")]
     pub fn direction(&self) -> Direction {
         let res = call_method_device!(
@@ -304,9 +312,9 @@ impl Servo {
         Direction::from_jni_object_servo(self.vm(), res)
     }
 
-    /// Sets the current position of the servo, expressed as a fraction of its available range. If
-    /// PWM power is enabled for the servo, the servo will attempt to move to the indicated
-    /// position.
+    /// Sets the current position of the servo, expressed as a fraction of its
+    /// available range. If PWM power is enabled for the servo, the servo
+    /// will attempt to move to the indicated position.
     #[doc(alias = "setPosition")]
     pub fn set_target_position(&self, target_pos: f64) {
         debug_assert!(
@@ -316,9 +324,10 @@ impl Servo {
         call_method_device!(void self, self.object(), "setPosition", "(D)V", [target_pos]);
     }
 
-    /// Returns the position to which the servo was last commanded to move. Note that this method
-    /// does NOT read a position from the servo through any electrical means, as no such
-    /// electrical mechanism is, generally, available.
+    /// Returns the position to which the servo was last commanded to move. Note
+    /// that this method does NOT read a position from the servo through any
+    /// electrical means, as no such electrical mechanism is, generally,
+    /// available.
     #[doc(alias = "getPosition")]
     #[must_use]
     pub fn target_position(&self) -> f64 {
@@ -326,21 +335,25 @@ impl Servo {
             [])
     }
 
-    /// Scales the available movement range of the servo to be a subset of its maximum range.
-    /// Subsequent positioning calls will operate within that subset range. This is useful if
-    /// your servo has only a limited useful range of movement due to the physical hardware that
-    /// it is manipulating (as is often the case) but you don't want to have to manually scale
-    /// and adjust the input to [`Servo::set_target_position`] each time.
+    /// Scales the available movement range of the servo to be a subset of its
+    /// maximum range. Subsequent positioning calls will operate within that
+    /// subset range. This is useful if your servo has only a limited useful
+    /// range of movement due to the physical hardware that
+    /// it is manipulating (as is often the case) but you don't want to have to
+    /// manually scale and adjust the input to
+    /// [`Servo::set_target_position`] each time.
     ///
-    /// For example, if `set_range(0.2..0.8)` is set then servo positions will be scaled to fit in
-    /// that range. `set_target_position(0.0)` scales to 0.2, `set_target_position(1.0)` scales
-    /// to 0.8 (notably exclusive bounds are essentially treated as inclusive here!),
-    /// `set_target_position(0.5)` scales to 0.5, `set_target_position(0.25)` scales to 0.35, and
-    /// `set_target_position(0.75)` scales to 0.65.
+    /// For example, if `set_range(0.2..0.8)` is set then servo positions will
+    /// be scaled to fit in that range. `set_target_position(0.0)` scales to
+    /// 0.2, `set_target_position(1.0)` scales to 0.8 (notably exclusive
+    /// bounds are essentially treated as inclusive here!),
+    /// `set_target_position(0.5)` scales to 0.5, `set_target_position(0.25)`
+    /// scales to 0.35, and `set_target_position(0.75)` scales to 0.65.
     ///
-    /// Note the parameters passed here are relative to the underlying full range of motion of the
-    /// servo, not its currently scaled range, if any. Thus, `set_range(0.0..1.0)` will reset
-    /// the servo to its full range of movement. In Rust, `set_range(..)` will achieve the same
+    /// Note the parameters passed here are relative to the underlying full
+    /// range of motion of the servo, not its currently scaled range, if
+    /// any. Thus, `set_range(0.0..1.0)` will reset the servo to its full
+    /// range of movement. In Rust, `set_range(..)` will achieve the same
     /// effect.
     #[doc(alias = "scaleRange")]
     pub fn set_range(&self, range: impl RangeBounds<f64>) {
@@ -388,7 +401,8 @@ impl CRServo {
             .unwrap();
     }
 
-    /// Returns the current logical direction in which this motor is set as operating.
+    /// Returns the current logical direction in which this motor is set as
+    /// operating.
     #[doc(alias = "getDirection")]
     pub fn direction(&self) -> Direction {
         let res = call_method_device!(
@@ -401,8 +415,9 @@ impl CRServo {
         Direction::from_jni_object_servo(self.vm(), res)
     }
 
-    /// Sets the power level of the motor, expressed as a fraction of the maximum possible power /
-    /// speed supported according to the run mode in which the motor is operating.
+    /// Sets the power level of the motor, expressed as a fraction of the
+    /// maximum possible power / speed supported according to the run mode
+    /// in which the motor is operating.
     ///
     /// Setting a power level of zero will brake the motor
     #[doc(alias = "setPower")]
@@ -475,12 +490,14 @@ device!(
 );
 
 impl IMU {
-    /// Resets the robot's yaw angle to 0. After calling this method, the reported orientation will
-    /// be relative to the robot's position when this method was called, as if the robot was
-    /// perfectly level right then. That is to say, the pitch and yaw will be ignored when this
+    /// Resets the robot's yaw angle to 0. After calling this method, the
+    /// reported orientation will be relative to the robot's position when
+    /// this method was called, as if the robot was perfectly level right
+    /// then. That is to say, the pitch and yaw will be ignored when this
     /// method is called.
     ///
-    /// Unlike yaw, pitch and roll are always relative to gravity, and never need to be reset.
+    /// Unlike yaw, pitch and roll are always relative to gravity, and never
+    /// need to be reset.
     #[doc(alias = "resetYaw")]
     pub fn reset_yaw(&self) {
         call_method_device!(void self, self.object(), "resetYaw", "()V", []);
