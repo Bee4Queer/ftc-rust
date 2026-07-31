@@ -1023,8 +1023,8 @@ impl FtcContext {
     #[doc(alias = "getRuntime")]
     #[must_use]
     pub fn runtime(&self) -> Duration {
-        let secs = call_method!(float self, self.this, "getRuntime", "()F", []);
-        Duration::from_secs_f32(secs)
+        let secs = call_method!(double self, self.this, "getRuntime", "()D", []);
+        Duration::from_secs_f64(secs)
     }
     /// Reset the opmode's runtime.
     #[doc(alias = "resetRuntime")]
