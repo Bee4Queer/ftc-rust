@@ -6,7 +6,7 @@ use jni::signature::RuntimeMethodSignature;
 use log::trace;
 
 use crate::{
-    call_method, call_method_device, debug_assert, debug_assert_ne,
+    call_method, debug_assert, debug_assert_ne,
     hardware::{
         AngularVelocity, Direction, IntoJniObject as _, Rev9AxisImuOrientationOnRobot, RunMode,
         YawPitchRollAngles, ZeroPowerBehavior, get_class,
@@ -19,27 +19,19 @@ macro_rules! device {
     {$(#[$attr:meta])* $name:ident, JAVA_CLASS = $java_class:literal $(;)? $(,)? JNI_CLASS = $jni_class:literal $(;)? $(,)?} => {
         paste::paste! {
             $(#[$attr])*
-            #[doc(hidden)]
-            struct [< $name Inner >] {
-                /// The environment.
-                vm: $crate::jni::JavaVM,
-                /// The actual object.
-                object: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>,
-            }
-
-            impl ::std::fmt::Debug for [< $name Inner >] {
-                fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                    f.write_str(concat!("(opaque ", stringify!($name), " object, wraps ", $java_class, ")"))
-                }
-            }
-
-            $(#[$attr])*
             ///
-            /// Default is essentially a null pointer and will panic upon attempted use.
-            #[derive(Default)]
+            /// Default is a null reference and will panic upon attempted use.
+            ///
+            /// Internal details: This struct is quite small, being represented as two pointers and thus only
+            /// taking up either 8 or 16 bytes of memory. However, cloning it is actually reasonably expensive,
+            /// as it has to create a new global reference on each clone, so cloning should be avoided where
+            /// possible. All methods should take an immutable reference and this is [`Sync`], so this should be
+            /// reasonably easy. The exception to this is null references, which are as simple as a memcopy to
+            /// clone, however you generally shouldn't have null references floating around.
+            #[derive(Clone, Default)]
             #[repr(transparent)]
             pub struct $name {
-                inner: Option<[< $name Inner >]>
+                inner: Option<$crate::hardware::HardwareDevice>
             }
 
             impl $name {
@@ -48,27 +40,27 @@ macro_rules! device {
                 pub fn is_null(&self) -> bool {
                     self.inner.is_none()
                 }
-                #[must_use]
-                fn vm(&self) -> &$crate::jni::JavaVM {
-                    if let Some(inner) = self.inner.as_ref() {
-                        &inner.vm
-                    } else {
-                        panic!("Attempted to use null device");
-                    }
-                }
-                #[must_use]
-                fn object(&self) -> &$crate::jni::refs::Global<$crate::jni::objects::JObject<'static>> {
-                    if let Some(inner) = self.inner.as_ref() {
-                        &inner.object
-                    } else {
-                        panic!("Attempted to use null device");
-                    }
+            }
+
+            impl ::std::ops::Deref for $name {
+                type Target = $crate::hardware::HardwareDevice;
+                fn deref(&self) -> &Self::Target {
+                    let Some(out) = &self.inner.as_ref() else {
+                        $crate::panic!("tried to dereference a null pointer");
+                    };
+                    out
                 }
             }
 
             impl ::std::fmt::Debug for $name {
                 fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                    f.write_str(concat!("(opaque ", stringify!($name), " object, wraps ", $java_class, ")"))
+                    if self.is_null() {
+                        return f.write_str(concat!("(null ", stringify!($name), " reference)"));
+                    }
+                    f.debug_struct(stringify!($name))
+                        .field("manufacturer", &self.manufacturer())
+                        .field("device_name", &self.device_name())
+                        .finish_non_exhaustive()
                 }
             }
 
@@ -77,7 +69,7 @@ macro_rules! device {
                 const JNI_CLASS: &'static str = $jni_class;
                 fn from_java(vm: $crate::jni::JavaVM, object: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>) -> Self {
                     Self {
-                        inner: Some([< $name Inner >] {
+                        inner: Some($crate::hardware::HardwareDevice {
                             vm,
                             object,
                         })
@@ -102,12 +94,12 @@ impl DcMotor {
     #[doc(alias = "setDirection")]
     pub fn set_direction(&self, dir: Direction) {
         trace!("setting direction of DcMotor");
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let obj = dir.into_jni_object_dcmotor(env);
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "setDirection",
                     format!("(L{};)V", Direction::DCMOTOR_JNI_CLASS),
                     [&obj]
@@ -121,14 +113,14 @@ impl DcMotor {
     /// Returns the current logical direction in which this motor is operating.
     #[doc(alias = "getDirection")]
     pub fn direction(&self) -> Direction {
-        let res = call_method_device!(
+        let res = call_method!(
             obj self,
-            self.object(),
+            self.object,
             "getDirection",
             format!("()L{};", Direction::DCMOTOR_JNI_CLASS),
             []
         );
-        Direction::from_jni_object_dcmotor(self.vm(), res)
+        Direction::from_jni_object_dcmotor(&self.vm, res)
     }
 
     /// Sets the power level of the motor, expressed as a fraction of the
@@ -147,14 +139,14 @@ impl DcMotor {
             "motor power/speed should be contained within -1.0..=1.0"
         );
 
-        call_method_device!(void self, self.object(), "setPower", "(D)V", [power]);
+        call_method!(void self, self.object, "setPower", "(D)V", [power]);
     }
 
     /// Returns the current configured power level of the motor.
     #[doc(alias = "getPower")]
     #[must_use]
     pub fn power(&self) -> f64 {
-        call_method_device!(double self, self.object(), "getPower", "()D",
+        call_method!(double self, self.object, "getPower", "()D",
             [])
     }
 
@@ -163,12 +155,12 @@ impl DcMotor {
     pub fn set_zero_power_behavior(&self, zpb: ZeroPowerBehavior) {
         debug_assert_ne!(zpb, ZeroPowerBehavior::Unknown);
 
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let obj = zpb.into_jni_object(env);
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "setZeroPowerBehavior",
                     format!("(L{};)V", ZeroPowerBehavior::JNI_CLASS),
                     [&obj]
@@ -182,14 +174,14 @@ impl DcMotor {
     /// be applied.
     #[doc(alias = "getZeroPowerBehavior")]
     pub fn zero_power_behavior(&self) -> ZeroPowerBehavior {
-        let res = call_method_device!(
+        let res = call_method!(
             obj self,
-            self.object(),
+            self.object,
             "getZeroPowerBehavior",
             format!("()L{};", ZeroPowerBehavior::JNI_CLASS),
             []
         );
-        ZeroPowerBehavior::from_jni_object(self.vm(), res)
+        ZeroPowerBehavior::from_jni_object(&self.vm, res)
     }
 
     /// Sets the desired encoder target position to which the motor should
@@ -206,14 +198,14 @@ impl DcMotor {
     /// function properly.
     #[doc(alias = "setTargetPosition")]
     pub fn set_target_position(&self, target_pos: i32) {
-        call_method_device!(void self, self.object(), "setTargetPosition", "(I)V", [target_pos]);
+        call_method!(void self, self.object, "setTargetPosition", "(I)V", [target_pos]);
     }
 
     /// Returns the current target encoder position for this motor.
     #[doc(alias = "getTargetPosition")]
     #[must_use]
     pub fn target_position(&self) -> i32 {
-        call_method_device!(int self, self.object(), "getTargetPosition", "()I",
+        call_method!(int self, self.object, "getTargetPosition", "()I",
             [])
     }
 
@@ -222,7 +214,7 @@ impl DcMotor {
     #[doc(alias = "isBusy")]
     #[must_use]
     pub fn busy(&self) -> bool {
-        call_method_device!(bool self, self.object(), "isBusy", "()Z",
+        call_method!(bool self, self.object, "isBusy", "()Z",
             [])
     }
 
@@ -233,19 +225,19 @@ impl DcMotor {
     #[doc(alias = "getCurrentPosition")]
     #[must_use]
     pub fn current_position(&self) -> i32 {
-        call_method_device!(int self, self.object(), "getCurrentPosition", "()I",
+        call_method!(int self, self.object, "getCurrentPosition", "()I",
             [])
     }
 
     /// Sets the behavior of the motor when a power level of zero is applied.
     #[doc(alias = "setMode")]
     pub fn set_mode(&self, mode: RunMode) {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let obj = mode.into_jni_object(env);
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "setMode",
                     format!("(L{};)V", RunMode::JNI_CLASS),
                     [&obj]
@@ -259,14 +251,14 @@ impl DcMotor {
     /// be applied.
     #[doc(alias = "getMode")]
     pub fn mode(&self) -> RunMode {
-        let res = call_method_device!(
+        let res = call_method!(
             obj self,
-            self.object(),
+            self.object,
             "getMode",
             format!("()L{};", RunMode::JNI_CLASS),
             []
         );
-        RunMode::from_jni_object(self.vm(), res)
+        RunMode::from_jni_object(&self.vm, res)
     }
 }
 
@@ -283,12 +275,12 @@ impl Servo {
     /// Sets the logical direction in which this servo operates.
     #[doc(alias = "setDirection")]
     pub fn set_direction(&self, dir: Direction) {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let obj = dir.into_jni_object_servo(env);
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "setDirection",
                     format!("(L{};)V", Direction::SERVO_JNI_CLASS),
                     [&obj]
@@ -302,14 +294,14 @@ impl Servo {
     /// operating.
     #[doc(alias = "getDirection")]
     pub fn direction(&self) -> Direction {
-        let res = call_method_device!(
+        let res = call_method!(
             obj self,
-            self.object(),
+            self.object,
             "getDirection",
             format!("()L{};", Direction::SERVO_JNI_CLASS),
             []
         );
-        Direction::from_jni_object_servo(self.vm(), res)
+        Direction::from_jni_object_servo(&self.vm, res)
     }
 
     /// Sets the current position of the servo, expressed as a fraction of its
@@ -321,7 +313,7 @@ impl Servo {
             (0.0..=1.0).contains(&target_pos),
             "servo target position must be within 0..=1"
         );
-        call_method_device!(void self, self.object(), "setPosition", "(D)V", [target_pos]);
+        call_method!(void self, self.object, "setPosition", "(D)V", [target_pos]);
     }
 
     /// Returns the position to which the servo was last commanded to move. Note
@@ -331,7 +323,7 @@ impl Servo {
     #[doc(alias = "getPosition")]
     #[must_use]
     pub fn target_position(&self) -> f64 {
-        call_method_device!(double self, self.object(), "getPosition", "()D",
+        call_method!(double self, self.object, "getPosition", "()D",
             [])
     }
 
@@ -369,7 +361,7 @@ impl Servo {
             start >= 0.0 && end <= 1.0,
             "servo range should not be larger than 0.0, 1.0"
         );
-        call_method_device!(void self, self.object(), "scaleRange", "(DD)V", [start, end]);
+        call_method!(void self, self.object, "scaleRange", "(DD)V", [start, end]);
     }
 }
 
@@ -386,12 +378,12 @@ impl CRServo {
     /// Sets the logical direction in which this motor operates.
     #[doc(alias = "setDirection")]
     pub fn set_direction(&self, dir: Direction) {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let obj = dir.into_jni_object_servo(env);
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "setDirection",
                     format!("(L{};)V", Direction::SERVO_JNI_CLASS),
                     [&obj]
@@ -405,14 +397,14 @@ impl CRServo {
     /// operating.
     #[doc(alias = "getDirection")]
     pub fn direction(&self) -> Direction {
-        let res = call_method_device!(
+        let res = call_method!(
             obj self,
-            self.object(),
+            self.object,
             "getDirection",
             format!("()L{};", Direction::SERVO_JNI_CLASS),
             []
         );
-        Direction::from_jni_object_servo(self.vm(), res)
+        Direction::from_jni_object_servo(&self.vm, res)
     }
 
     /// Sets the power level of the motor, expressed as a fraction of the
@@ -426,14 +418,14 @@ impl CRServo {
             (-1.0..=1.0).contains(&power),
             "CRServo power/speed should be contained within -1.0..=1.0"
         );
-        call_method_device!(void self, self.object(), "setPower", "(D)V", [power]);
+        call_method!(void self, self.object, "setPower", "(D)V", [power]);
     }
 
     /// Returns the current configured power level of the motor.
     #[doc(alias = "getPower")]
     #[must_use]
     pub fn power(&self) -> f64 {
-        call_method_device!(double self, self.object(), "getPower", "()D",
+        call_method!(double self, self.object, "getPower", "()D",
             [])
     }
 }
@@ -500,25 +492,25 @@ impl IMU {
     /// need to be reset.
     #[doc(alias = "resetYaw")]
     pub fn reset_yaw(&self) {
-        call_method_device!(void self, self.object(), "resetYaw", "()V", []);
+        call_method!(void self, self.object, "resetYaw", "()V", []);
     }
     /// Get the [`YawPitchRollAngles`] of the robot.
     #[doc(alias = "getRobotYawPitchRollAngles")]
     pub fn angles(&self) -> YawPitchRollAngles {
-        let res = call_method_device!(
+        let res = call_method!(
             obj self,
-            self.object(),
+            self.object,
             "getRobotYawPitchRollAngles",
             format!("()L{};", YawPitchRollAngles::JNI_CLASS),
             []
         );
-        YawPitchRollAngles::from_jni_object(self.vm(), res)
+        YawPitchRollAngles::from_jni_object(&self.vm, res)
     }
     /// Initializes the IMU with non-default settings.
     #[doc(alias = "initialize")]
     #[must_use]
     pub fn init(&self, orientation: Rev9AxisImuOrientationOnRobot) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let orientation = orientation.into_jni_object(env);
                 let class = get_class(env, "com/qualcomm/robotcore/hardware/IMU$Parameters");
@@ -535,7 +527,7 @@ impl IMU {
 
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "initialize",
                     "(Lcom/qualcomm/robotcore/hardware/IMU$Parameters;)Z",
                     [&params]
@@ -547,13 +539,13 @@ impl IMU {
     /// Get the [`AngularVelocity`] of the robot.
     #[doc(alias = "getRobotAngularVelocity")]
     pub fn velocity(&self) -> AngularVelocity {
-        let res = call_method_device!(
+        let res = call_method!(
             obj self,
-            self.object(),
+            self.object,
             "getRobotAngularVelocity",
             format!("()L{};", AngularVelocity::JNI_CLASS),
             []
         );
-        AngularVelocity::from_jni_object(self.vm(), res)
+        AngularVelocity::from_jni_object(&self.vm, res)
     }
 }

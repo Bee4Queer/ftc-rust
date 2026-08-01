@@ -19,6 +19,7 @@ use jni::{
 mod devices;
 pub use devices::*;
 pub mod limelight;
+pub mod sensors;
 use log::{error, trace};
 
 use crate::{call_method, debug_assert, get_field, new_global, new_string, unimplemented};
@@ -129,7 +130,7 @@ impl Iterator for Hardware {
                 )
                 .map(|v| HardwareDevice {
                     vm: self.vm.clone(),
-                    hardware_device: new_global!(env, v.l().unwrap()).unwrap(),
+                    object: new_global!(env, v.l().unwrap()).unwrap(),
                 })
             })
             .ok()
@@ -979,12 +980,31 @@ enum_variant_into! {
 /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/Hardware/latest/com/qualcomm/hardware/HardwareDevice.html>.
 ///
 /// A hardware device.
+///
+/// Internal details: This struct is quite small, being represented as two pointers and thus only
+/// taking up either 8 or 16 bytes of memory. However, cloning it is actually reasonably expensive,
+/// as it has to create a new global reference on each clone, so cloning should be avoided where
+/// possible. All methods should take an immutable reference and this is [`Sync`], so this should be
+/// reasonably easy.
 pub struct HardwareDevice {
     /// The environment.
-    vm: JavaVM,
-    /// The actual device object. Should be
+    pub vm: JavaVM,
+    /// The actual device object. Should implement
     /// com/qualcomm/robotcore/hardware/HardwareDevice.
-    hardware_device: Global<JObject<'static>>,
+    pub object: Global<JObject<'static>>,
+}
+
+impl Clone for HardwareDevice {
+    fn clone(&self) -> Self {
+        let obj = &self.object;
+        Self {
+            vm: self.vm.clone(),
+            object: self
+                .vm
+                .attach_current_thread(|env| env.new_global_ref(obj))
+                .unwrap(),
+        }
+    }
 }
 
 impl Debug for HardwareDevice {
@@ -1010,7 +1030,7 @@ impl HardwareDevice {
             .attach_current_thread(|env| {
                 let res = call_method!(
                     env env,
-                    self.hardware_device,
+                    self.object,
                     "getManufacturer",
                     format!("()L{};", Manufacturer::JNI_CLASS),
                     []
@@ -1034,18 +1054,13 @@ impl HardwareDevice {
             .attach_current_thread(|env| {
                 let res = call_method!(
                     env env,
-                    self.hardware_device,
+                    self.object,
                     "getDeviceName",
                     "()Ljava/lang/String;",
                     []
                 )?
                 .l()?;
-                jni::errors::Result::Ok(
-                    JString::cast_local(env, res)?
-                        .mutf8_chars(env)?
-                        .to_str()
-                        .to_string(),
-                )
+                jni::errors::Result::Ok(JString::cast_local(env, res)?.to_string())
             })
             .unwrap()
     }
@@ -1057,7 +1072,7 @@ impl HardwareDevice {
             .attach_current_thread(|env| {
                 let res = call_method!(
                     env env,
-                    self.hardware_device,
+                    self.object,
                     "getConnectionInfo",
                     "()Ljava/lang/String;",
                     []
@@ -1077,12 +1092,12 @@ impl HardwareDevice {
     /// direction to 'forward'.
     #[doc(alias = "resetDeviceConfigurationForOpMode")]
     pub fn reset_device_config(&self) {
-        call_method!(void self, self.hardware_device, "resetDeviceConfigurationForOpMode", "()V", []);
+        call_method!(void self, self.object, "resetDeviceConfigurationForOpMode", "()V", []);
     }
     /// Disables this device.
     #[doc(alias = "close")]
     pub fn disable(&self) {
-        call_method!(void self, self.hardware_device, "close", "()V", []);
+        call_method!(void self, self.object, "close", "()V", []);
     }
 }
 

@@ -11,91 +11,22 @@ use jni::{
 };
 
 use crate::{
-    call_method, debug_assert, get_field, hardware::{IntoJniObject, limelight::results::LLResult}, index_jlist, jlist, new_global, panic, todo,
+    call_method, debug_assert, get_field,
+    hardware::{IntoJniObject, limelight::results::LLResult},
+    index_jlist, jlist, new_global, todo,
 };
 
-/// Javadoc available at <https://javadoc.io/static/org.firstinspires.ftc/Hardware/11.1.0/com/qualcomm/hardware/limelightvision/Limelight3A.html>.
-///
-/// Driver for Limelight 3A Vision Sensor. `Limelight3A` provides support for
-/// the Limelight Vision Limelight 3A Vision Sensor.
-#[doc(hidden)]
-struct Limelight3AInner {
-    /// The environment.
-    vm: crate::jni::JavaVM,
-    /// The actual object.
-    object: crate::jni::refs::Global<crate::jni::objects::JObject<'static>>,
-}
-
-impl std::fmt::Debug for Limelight3AInner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(
-            "(opaque Limelight3A object, wraps \
-             com.qualcomm.robotcore.hardware.limelightvision.Limelight3A)",
-        )
-    }
-}
-
-/// Javadoc available at <https://javadoc.io/static/org.firstinspires.ftc/Hardware/11.1.0/com/qualcomm/hardware/limelightvision/Limelight3A.html>.
-///
-/// Driver for Limelight 3A Vision Sensor. `Limelight3A` provides support for
-/// the Limelight Vision Limelight 3A Vision Sensor.
-///
-/// Default is essentially a null pointer and will panic upon attempted use.
-#[repr(transparent)]
-#[derive(Default)]
-pub struct Limelight3A {
-    #[allow(clippy::missing_docs_in_private_items)]
-    inner: Option<Limelight3AInner>,
-}
-
-#[allow(clippy::missing_docs_in_private_items)]
-impl Limelight3A {
-    /// Returns whether this device is a null pointer.
-    #[must_use]
-    pub fn is_null(&self) -> bool {
-        self.inner.is_none()
-    }
-    #[must_use]
-    fn vm(&self) -> &crate::jni::JavaVM {
-        if let Some(inner) = self.inner.as_ref() {
-            &inner.vm
-        } else {
-            panic!("Attempted to use null device");
-        }
-    }
-    #[must_use]
-    fn object(&self) -> &crate::jni::refs::Global<crate::jni::objects::JObject<'static>> {
-        if let Some(inner) = self.inner.as_ref() {
-            &inner.object
-        } else {
-            panic!("Attempted to use null device");
-        }
-    }
-}
-
-impl std::fmt::Debug for Limelight3A {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(
-            "(opaque Limelight3A object, wraps \
-             com.qualcomm.robotcore.hardware.limelightvision.Limelight3A)",
-        )
-    }
-}
-
-impl crate::hardware::Device for Limelight3A {
-    const JAVA_CLASS: &'static str = "com.qualcomm.robotcore.hardware.limelightvision.Limelight3A";
-    const JNI_CLASS: &'static str = "com/qualcomm/robotcore/hardware/limelightvision/Limelight3A";
-    fn from_java(
-        vm: crate::jni::JavaVM,
-        object: crate::jni::refs::Global<crate::jni::objects::JObject<'static>>,
-    ) -> Self {
-        let out = Self {
-            inner: Some(Limelight3AInner { vm, object }),
-        };
-        out.start();
-        out
-    }
-}
+device!(
+    /// Javadoc available at <https://javadoc.io/static/org.firstinspires.ftc/Hardware/11.1.0/com/qualcomm/hardware/limelightvision/Limelight3A.html>.
+    ///
+    /// Driver for Limelight 3A Vision Sensor. `Limelight3A` provides support for
+    /// the Limelight Vision Limelight 3A Vision Sensor.
+    ///
+    /// Default is essentially a null pointer and will panic upon attempted use.
+    Limelight3A,
+    JAVA_CLASS = "com.qualcomm.robotcore.hardware.limelightvision.Limelight3A";
+    JNI_CLASS = "com/qualcomm/robotcore/hardware/limelightvision/Limelight3A";
+);
 
 /// Temporary configuration struct used for changing configuration of a
 /// [`Limelight3A`]. Shouldn't be stored usually, as it prevents usage of the
@@ -121,11 +52,11 @@ impl Limelight3AConfig<'_> {
     pub fn set_poll_rate(&self, hz: u8) {
         debug_assert!((1..=250).contains(&hz));
         self.limelight
-            .vm()
+            .vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.limelight.object(),
+                    self.limelight.object,
                     "setPollRateHz",
                     "(I)V",
                     [i32::from(hz)]
@@ -153,11 +84,11 @@ impl Limelight3A {
     ///
     /// Mostly unnecessary with the Rust SDK due to how stuff is implemented.
     pub fn start(&self) {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "start",
                     "()V",
                     []
@@ -170,11 +101,11 @@ impl Limelight3A {
     ///
     /// Mostly unnecessary with the Rust SDK due to how stuff is implemented.
     pub fn stop(&self) {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "stop",
                     "()V",
                     []
@@ -185,11 +116,11 @@ impl Limelight3A {
     }
     /// Pauses polling of Limelight data.
     pub fn pause(&self) {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "pause",
                     "()V",
                     []
@@ -200,11 +131,11 @@ impl Limelight3A {
     }
     /// Shuts down the Limelight connection and stops all ongoing processes.
     pub fn shutdown(&self) {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "shutdown",
                     "()V",
                     []
@@ -218,11 +149,11 @@ impl Limelight3A {
     #[doc(alias = "isRunning")]
     #[must_use]
     pub fn running(&self) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "isRunning",
                     "()Z",
                     []
@@ -237,11 +168,11 @@ impl Limelight3A {
     #[must_use]
     pub fn time_since_update(&self) -> Duration {
         Duration::from_millis(
-            self.vm()
+            self.vm
                 .attach_current_thread(|env| {
                     call_method!(
                         env env,
-                        self.object(),
+                        self.object,
                         "getTimeSinceLastUpdate",
                         "()J",
                         []
@@ -256,11 +187,11 @@ impl Limelight3A {
     #[doc(alias = "isConnected")]
     #[must_use]
     pub fn connected(&self) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "isConnected",
                     "()Z",
                     []
@@ -276,11 +207,11 @@ impl Limelight3A {
     #[doc(alias = "reloadPipeline")]
     #[must_use]
     pub fn reload_pipeline(&self) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "reloadPipeline",
                     "()Z",
                     []
@@ -296,11 +227,11 @@ impl Limelight3A {
     #[doc(alias = "pipelineSwitch")]
     #[must_use]
     pub fn switch_pipeline(&self, index: usize) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "pipelineSwitch",
                     "(I)Z",
                     [index as i32]
@@ -316,12 +247,12 @@ impl Limelight3A {
     #[doc(alias = "captureSnapshot")]
     #[must_use]
     pub fn capture_snapshot(&self, name: impl AsRef<str>) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let s = JString::new(env, name).unwrap();
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "captureSnapshot",
                     "(Ljava/lang/String;)Z",
                     [AsRef::<JObject>::as_ref(&s)]
@@ -337,11 +268,11 @@ impl Limelight3A {
     #[doc(alias = "deleteSnapshots")]
     #[must_use]
     pub fn delete_snapshots(&self) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "deleteSnapshots",
                     "()Z",
                     []
@@ -357,12 +288,12 @@ impl Limelight3A {
     #[doc(alias = "deleteSnapshot")]
     #[must_use]
     pub fn delete_snapshot(&self, name: impl AsRef<str>) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let s = JString::new(env, name).unwrap();
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "deleteSnapshot",
                     "(Ljava/lang/String;)Z",
                     [AsRef::<JObject>::as_ref(&s)]
@@ -379,11 +310,11 @@ impl Limelight3A {
     #[doc(alias = "updatePythonInputs")]
     #[must_use]
     pub fn update_python_inputs(&self, values: [f64; 8]) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "updatePythonInputs",
                     "(DDDDDDDD)Z",
                     values
@@ -401,11 +332,11 @@ impl Limelight3A {
     #[doc(alias = "updateRobotOrientation")]
     #[must_use]
     pub fn update_robot_orientation(&self, yaw: f64) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "updateRobotOrientation",
                     "(D)Z",
                     [yaw]
@@ -421,12 +352,12 @@ impl Limelight3A {
     #[doc(alias = "uploadPipeline")]
     #[must_use]
     pub fn upload_pipeline(&self, json: impl AsRef<str>, index: Option<usize>) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let s = JString::new(env, json).unwrap();
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "uploadPipeline",
                     "(Ljava/lang/String;I)Z",
                     [AsRef::<JObject>::as_ref(&s).into(), match index {
@@ -443,11 +374,11 @@ impl Limelight3A {
     #[doc(alias = "getStatus")]
     pub fn status(&self) -> LLStatus {
         let global = self
-            .vm()
+            .vm
             .attach_current_thread(|env| {
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "getStatus",
                     format!("()L{};", LLStatus::JNI_CLASS),
                     []
@@ -457,7 +388,7 @@ impl Limelight3A {
             })
             .unwrap();
 
-        LLStatus::from_jni_object(self.vm(), global)
+        LLStatus::from_jni_object(&self.vm, global)
     }
 
     /// Uploads a new fiducial field map. Panics in debug builds if map is empty
@@ -471,12 +402,12 @@ impl Limelight3A {
             "Field map fiducials list is empty"
         );
 
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let map = map.into_jni_object(env);
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "uploadFieldmap",
                     "(Lcom/qualcomm/hardware/limelightvision/LLFieldMap;I)Z",
                     [(&map).into(), JValue::Int(index as i32)]
@@ -490,12 +421,12 @@ impl Limelight3A {
     #[doc(alias = "uploadPython")]
     #[must_use]
     pub fn upload_python(&self, code: String, index: Option<usize>) -> bool {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
                 let s = JString::new(env, code).unwrap();
                 call_method!(
                     env env,
-                    self.object(),
+                    self.object,
                     "uploadPython",
                     "(Ljava/lang/String;I)Z",
                     [AsRef::<JObject>::as_ref(&s).into(), match index {
@@ -511,15 +442,22 @@ impl Limelight3A {
     /// Gets the latest result from the Limelight.
     #[doc(alias = "getLatestResult")]
     pub fn result(&self) -> LLResult {
-        self.vm()
+        self.vm
             .attach_current_thread(|env| {
-                jni::errors::Result::Ok(LLResult::from_jni_object(self.vm(), new_global!(env, call_method!(
-                    env env,
-                    self.object(),
-                    "getLatestResult",
-                    "()Lcom/qualcomm/hardware/limelightvision/LLResult;",
-                    []
-                )?.l()?)?))
+                jni::errors::Result::Ok(LLResult::from_jni_object(
+                    &self.vm,
+                    new_global!(
+                        env,
+                        call_method!(
+                            env env,
+                            self.object,
+                            "getLatestResult",
+                            "()Lcom/qualcomm/hardware/limelightvision/LLResult;",
+                            []
+                        )?
+                        .l()?
+                    )?,
+                ))
             })
             .unwrap()
     }
