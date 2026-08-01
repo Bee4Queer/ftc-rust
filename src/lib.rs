@@ -9,7 +9,6 @@ use std::{
     sync::{Arc, LazyLock, atomic::AtomicI64},
     time::Duration,
 };
-use parking_lot::Mutex;
 
 #[cfg(feature = "proc-macro")]
 pub use ftc_rust_proc::ftc;
@@ -24,6 +23,7 @@ use jni::{
 };
 pub use log;
 use log::{info, trace, warn};
+use parking_lot::Mutex;
 
 use crate::{
     command::{Command, SCHEDULER},
@@ -318,7 +318,7 @@ impl<F: FnMut(f32) + 'static + Send + Sync> Command for StickCommand<F> {
 /// A macro for gamepad inputs.
 macro_rules! gamepad_button {
     ($($(#[$attr:meta])* $vis:vis button $name:ident $ty_name:ident)*) => {
-        paste::paste! {$($(#[$attr])*
+        pastey::paste! {$($(#[$attr])*
             #[must_use]
         $vis fn $name (&self) -> bool {
             self
@@ -404,7 +404,7 @@ macro_rules! gamepad_button {
         } }
     };
     ($($(#[$attr:meta])* $vis:vis float $name:ident $ty_name:ident)*) => {
-        paste::paste! {
+        pastey::paste! {
             $($(#[$attr])*
             $vis fn $name (&self) -> f32 {
                 self
@@ -752,6 +752,15 @@ impl Gamepad {
     );
 }
 
+/// The type of an op mode: Teleop, Autonomous, or Utility.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(missing_docs)]
+pub enum OpModeType {
+    Teleop,
+    Auto,
+    Utility,
+}
+
 /// A context used for accessing the Java runtime. Note that cloning is somewhat
 /// costly from creating a new JNI global reference to the `this` object, so
 /// prefer passing around references rather than owned contexts.
@@ -760,13 +769,21 @@ pub struct FtcContext {
     vm: JavaVM,
     /// The op mode class.
     this: Global<JObject<'static>>,
+    /// The type of this op mode.
+    kind: OpModeType,
 }
 
+/// Internal ID of an opmode. Used for storing user state internally.
+pub type OpModeId = i64;
+
+/// Internal representation of a state.
+type DynState = Box<dyn Any + Send + Sync + 'static>;
+
 /// User state
-static STATE: LazyLock<Mutex<HashMap<i64, Box<dyn Any + Send + Sync + 'static>>>> =
+static STATE: LazyLock<Mutex<HashMap<OpModeId, Vec<DynState>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Counter used to assign IDs to opmodes
+/// Counter used to assign IDs to opmodes. Starts at 1 as 0 is used to mark that an ID hasn't been assigned.
 static OPMODE_COUNTER: AtomicI64 = AtomicI64::new(1);
 
 impl Debug for FtcContext {
@@ -780,12 +797,10 @@ impl Clone for FtcContext {
         Self {
             this: self
                 .vm
-                .attach_current_thread(|env| {
-                    let local_ref = env.new_local_ref(&self.this)?;
-                    env.new_global_ref(local_ref)
-                })
+                .attach_current_thread(|env| env.new_global_ref(&self.this))
                 .unwrap(),
             vm: self.vm.clone(),
+            kind: self.kind,
         }
     }
 }
@@ -800,7 +815,7 @@ impl FtcContext {
     /// Create a new context.
     #[doc(hidden)]
     #[must_use]
-    pub fn new<'local>(env: &mut jni::Env<'local>, this: JObject<'local>) -> Self {
+    pub fn new<'local>(env: &mut jni::Env<'local>, this: JObject<'local>, kind: OpModeType) -> Self {
         android_logger::init_once(android_logger::Config::default().with_max_level(
             if cfg!(debug_assertions) {
                 log::LevelFilter::Trace
@@ -809,24 +824,24 @@ impl FtcContext {
             },
         ));
 
-        trace!("Rust FTC initalized");
+        info!("Rust FTC initalized");
 
-        Self::new_no_log(env, this)
+        Self::new_no_log(env, this, kind)
     }
     /// Create a new context.
     #[doc(hidden)]
     #[must_use]
-    pub fn new_no_log<'local>(env: &mut jni::Env<'local>, this: JObject<'local>) -> Self {
+    pub fn new_no_log<'local>(env: &mut jni::Env<'local>, this: JObject<'local>, kind: OpModeType) -> Self {
         let out = Self {
             this: env.new_global_ref(this).unwrap(),
             vm: env.get_java_vm().unwrap(),
+            kind,
         };
         if out.id() == 0 {
             out.vm
                 .attach_current_thread(|env| {
-                    let local_ref = env.new_local_ref(&out.this)?;
                     env.set_field(
-                        local_ref,
+                        &out.this,
                         jni_str!("rust_id"),
                         jni_sig!("J"),
                         OPMODE_COUNTER
@@ -839,23 +854,27 @@ impl FtcContext {
         }
         out
     }
-    /// Call a method with the state of this context. Panics if the associated
-    /// state isn't the provided type.
+    /// Call a method with the state of this context. Each op mode can have any number of states.
     pub fn with_state<State: Any + Default + Send + Sync + 'static, R>(
         &self,
         f: impl FnOnce(&mut State) -> R,
     ) -> R {
         let mut lock = STATE.lock();
-        let state = lock
-            .entry(self.id())
-            .or_insert_with(|| Box::new(State::default()))
-            .downcast_mut::<State>()
-            .unwrap();
+
+        let states = lock.entry(self.id()).or_default();
+
+        let state = match states.iter_mut().find(|v| v.is::<State>()) {
+            Some(v) => v,
+            None => states.push_mut(Box::new(State::default())),
+        }
+        .downcast_mut::<State>()
+        .unwrap();
+
         f(state)
     }
     /// Get the unique ID for this opmode.
     #[must_use]
-    pub fn id(&self) -> i64 {
+    pub fn id(&self) -> OpModeId {
         self.vm
             .attach_current_thread(|env| {
                 let local_ref = env.new_local_ref(&self.this)?;
@@ -876,6 +895,11 @@ impl FtcContext {
     #[must_use]
     pub fn is_linear(&self) -> bool {
         !self.is_iterative()
+    }
+    /// The kind of this op mode.
+    #[must_use]
+    pub fn kind(&self) -> OpModeType {
+        self.kind
     }
     /// The current stage of the opmode.
     #[must_use]
@@ -994,7 +1018,7 @@ impl FtcContext {
     #[doc(alias = "waitForStart")]
     pub fn wait_for_start(&self) {
         if !self.is_linear() {
-            warn!("wait_for_start only exists in linear op modes; returning immediately");
+            warn!("wait_for_start only exists in linear op modes; doing nothing");
             return;
         }
         call_method!(void self, self.this, "waitForStart", "()V", []);
@@ -1057,7 +1081,7 @@ pub enum OpModeStage {
 }
 
 /// The actual contexts. Used by [`IterativeContext::get_for`].
-static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<i64, SyncSendIterativeContext>>> =
+static ITERATIVE_CONTEXTS: LazyLock<Mutex<HashMap<OpModeId, SyncSendIterativeContext>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The type of the iterative callbacks used in [`InnerIterativeContext`].
@@ -1128,6 +1152,30 @@ impl SyncSendIterativeContext {
     }
 }
 
+/// macro to generate the repetitive code needed for iterative callbacks.
+macro_rules! iterative_stages {
+    ($($(#[$meta:meta])* $stage:ident: $state:ident),* $(,)?) => {
+        pastey::paste!{
+            $(
+                #[doc = concat!("Register a new callback for the `", stringify!($stage), "` function. Does NOT overwrite any")]
+                /// previous callbacks and just adds another. Implicitly wrapped in [`FtcContext::with_state`]; use the state through the &mut T reference.
+                ///
+                $(#[$meta])*
+                pub fn [<# $stage>]<T: Any + Default + Send + Sync + 'static, C: Command>(&self, f: impl FnMut(&FtcContext, &mut T) -> C + Send + 'static) {
+                    self.register(IterativeCallback::[< $stage:upper_camel >], f);
+                }
+                #[doc(hidden)]
+                pub fn [< call_ $stage >](&mut self, ctx: &FtcContext) {
+                    self.inner.lock().stage = OpModeStage::$state;
+                    for f in &mut self.inner.lock().$stage {
+                        f(ctx);
+                    }
+                }
+            )*
+        }
+    };
+}
+
 impl IterativeContext<*const ()> {
     /// DO NOT USE THIS IF YOU JUST WANT TO DO REGULAR STUFF (access devices,
     /// telemetry, gamepads, etc)! [`IterativeContext`] is for registering
@@ -1147,10 +1195,10 @@ impl IterativeContext<*const ()> {
         }
     }
     #[doc(hidden)]
-    pub fn get_for<'local>(env: &mut jni::Env<'local>, this: &JObject<'local>) -> Self {
+    pub fn get_for<'local>(env: &mut jni::Env<'local>, this: &JObject<'local>, kind: OpModeType) -> Self {
         let this = env.new_local_ref(this).unwrap();
 
-        let id = FtcContext::new_no_log(env, this).id();
+        let id = FtcContext::new_no_log(env, this, kind).id();
         match ITERATIVE_CONTEXTS.lock().entry(id) {
             std::collections::hash_map::Entry::Occupied(occupied_entry) => {
                 occupied_entry.get().clone()
@@ -1166,7 +1214,11 @@ impl IterativeContext<*const ()> {
     }
     /// Register a new callback. Does NOT overwrite any previous callbacks
     /// and just adds another.
-    pub fn register(&self, at: IterativeCallback, f: impl FnMut(&FtcContext) + Send + 'static) {
+    pub fn register<T: Any + Default + Send + Sync + 'static, C: Command>(
+        &self,
+        at: IterativeCallback,
+        mut f: impl FnMut(&FtcContext, &mut T) -> C + Send + 'static,
+    ) {
         let mut inner = self.inner.lock();
         let callbacks = match at {
             IterativeCallback::Init => &mut inner.init,
@@ -1175,85 +1227,25 @@ impl IterativeContext<*const ()> {
             IterativeCallback::Loop => &mut inner.r#loop,
             IterativeCallback::Stop => &mut inner.stop,
         };
-        callbacks.push(Box::new(f));
+        callbacks.push(Box::new(move |ftc| {
+            ftc.with_state(|state| f(ftc, state)).schedule();
+        }));
     }
-    /// Register a new callback for the `init` function. Does NOT overwrite any
-    /// previous callbacks and just adds another.
-    ///
-    /// Prefer putting the body of a loop (and using [`FtcContext::with_state`]
-    /// for anything persistent) in
-    /// [`init_loop`](IterativeContext::init_loop).
-    pub fn init(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.register(IterativeCallback::Init, f);
-    }
-    /// Register a new callback for the `init_loop` function. Does NOT overwrite
-    /// any previous callbacks and just adds another.
-    ///
-    /// This callback should not have any internal loops/unbounded recursion as
-    /// it is called in a loop by the runtime itself.
-    pub fn init_loop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.register(IterativeCallback::InitLoop, f);
-    }
-    /// Register a new callback for the `start` function. Does NOT overwrite any
-    /// previous callbacks and just adds another.
-    ///
-    /// Prefer putting the body of a loop (and using [`FtcContext::with_state`]
-    /// for anything persistent) in [`loop`](IterativeContext::r#loop).
-    pub fn start(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.register(IterativeCallback::Start, f);
-    }
-    /// Register a new callback for the `loop` function. Does NOT overwrite any
-    /// previous callbacks and just adds another.
-    ///
-    /// This callback should not have any internal loops/unbounded recursion as
-    /// it is called in a loop by the runtime itself.
-    pub fn r#loop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.register(IterativeCallback::Loop, f);
-    }
-    /// Register a new callback for the `stop` function. Does NOT overwrite any
-    /// previous callbacks and just adds another.
-    ///
-    /// This should have minimal code needed for basic cleanup as it will be
-    /// terminated by the runtime if it takes too long.
-    pub fn stop(&self, f: impl FnMut(&FtcContext) + Send + 'static) {
-        self.register(IterativeCallback::Stop, f);
-    }
-
-    #[doc(hidden)]
-    pub fn call_init(&mut self, ctx: &FtcContext) {
-        self.inner.lock().stage = OpModeStage::Init;
-        for f in &mut self.inner.lock().init {
-            f(ctx);
-        }
-    }
-    #[doc(hidden)]
-    pub fn call_init_loop(&mut self, ctx: &FtcContext) {
-        self.inner.lock().stage = OpModeStage::Init;
-        for f in &mut self.inner.lock().init_loop {
-            f(ctx);
-        }
-    }
-    #[doc(hidden)]
-    pub fn call_start(&mut self, ctx: &FtcContext) {
-        self.inner.lock().stage = OpModeStage::Running;
-        for f in &mut self.inner.lock().start {
-            f(ctx);
-        }
-    }
-    #[doc(hidden)]
-    pub fn call_loop(&mut self, ctx: &FtcContext) {
-        self.inner.lock().stage = OpModeStage::Running;
-        for f in &mut self.inner.lock().r#loop {
-            f(ctx);
-        }
-    }
-    #[doc(hidden)]
-    pub fn call_stop(&mut self, ctx: &FtcContext) {
-        self.inner.lock().stage = OpModeStage::Stop;
-        for f in &mut self.inner.lock().stop {
-            f(ctx);
-        }
-    }
+    iterative_stages!(
+        /// Prefer putting the body of a loop in [`init_loop`](IterativeContext::init_loop).
+        init: Init,
+        /// This callback should not have any internal loops/unbounded recursion as
+        /// it is called in a loop by the runtime itself.
+        init_loop: Init,
+        /// Prefer putting the body of a loop in [`loop`](IterativeContext::r#loop).
+        start: Running,
+        /// This callback should not have any internal loops/unbounded recursion as
+        /// it is called in a loop by the runtime itself.
+        r#loop: Running,
+        /// This should have minimal code needed for basic cleanup as it will be
+        /// terminated by the runtime if it takes too long.
+        stop: Stop,
+    );
 }
 
 pub mod policy;

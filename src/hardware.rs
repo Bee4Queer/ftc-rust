@@ -24,6 +24,72 @@ use log::{error, trace};
 
 use crate::{call_method, debug_assert, get_field, new_global, new_string, unimplemented};
 
+/// Easily define a basic device.
+#[macro_export]
+macro_rules! device {
+    {$(#[$attr:meta])* $name:ident, JAVA_CLASS = $java_class:literal $(;)? $(,)? JNI_CLASS = $jni_class:literal $(;)? $(,)?} => {
+        $(#[$attr])*
+        ///
+        /// Default is a null reference and will panic upon attempted use.
+        ///
+        /// Internal details: This struct is quite small, being represented as two pointers and thus only
+        /// taking up either 8 or 16 bytes of memory. However, cloning it is actually reasonably expensive,
+        /// as it has to create a new global reference on each clone, so cloning should be avoided where
+        /// possible. All methods should take an immutable reference and this is [`Sync`], so this should be
+        /// reasonably easy. The exception to this is null references, which are as simple as a memcopy to
+        /// clone, however you generally shouldn't have null references floating around.
+        #[derive(Clone, Default)]
+        #[repr(transparent)]
+        pub struct $name {
+            inner: Option<$crate::hardware::HardwareDevice>
+        }
+
+        impl $name {
+            /// Returns whether this device is a null pointer.
+            #[must_use]
+            pub fn is_null(&self) -> bool {
+                self.inner.is_none()
+            }
+        }
+
+        impl ::std::ops::Deref for $name {
+            type Target = $crate::hardware::HardwareDevice;
+            fn deref(&self) -> &Self::Target {
+                let Some(out) = &self.inner.as_ref() else {
+                    $crate::panic!("tried to dereference a null pointer");
+                };
+                out
+            }
+        }
+
+        impl ::std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                if self.is_null() {
+                    return f.write_str(concat!("(null ", stringify!($name), " reference)"));
+                }
+                f.debug_struct(stringify!($name))
+                    .field("manufacturer", &self.manufacturer())
+                    .field("device_name", &self.device_name())
+                    .finish_non_exhaustive()
+            }
+        }
+
+        impl $crate::hardware::Device for $name {
+            const JAVA_CLASS: &'static str = $java_class;
+            const JNI_CLASS: &'static str = $jni_class;
+            fn from_java(vm: $crate::jni::JavaVM, object: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>) -> Self {
+                Self {
+                    inner: Some($crate::hardware::HardwareDevice {
+                        vm,
+                        object,
+                    })
+                }
+            }
+        }
+        impl $crate::hardware::MacroedDevice for $name {}
+    };
+}
+
 /// A device that can be made from a java object.
 ///
 /// Default implementation should
@@ -59,6 +125,9 @@ pub trait Device: Default {
         )
     }
 }
+
+#[doc(hidden)]
+pub trait MacroedDevice: Device {}
 
 /// A wrapper for accessing hardware-related methods.
 #[doc(alias = "HardwareMap")]
@@ -153,7 +222,7 @@ macro_rules! enum_variant_into {
         $(,)?
         $(;)?
     } => {
-        paste::paste!{
+        pastey::paste!{
             /// JNI class
             $vis const [< $($prefix)? JNI_CLASS >]: &'static str = $jni_class;
             /// Java class

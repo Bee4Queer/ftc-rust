@@ -1,7 +1,8 @@
 //! JNI error policy that's actually reasonable.
 
 use std::{
-    any::Any, panic::{AssertUnwindSafe, catch_unwind},
+    any::Any,
+    panic::{AssertUnwindSafe, catch_unwind},
 };
 
 use jni::{Env, errors::ErrorPolicy};

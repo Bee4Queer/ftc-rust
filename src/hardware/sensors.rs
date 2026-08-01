@@ -1,6 +1,6 @@
 //! Hardware sensors.
 
-use crate::{call_method, get_field, hardware::IntoJniObject};
+use crate::{call_method, device, get_field, hardware::IntoJniObject};
 
 device!(
     /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/NormalizedColorSensor.html>.

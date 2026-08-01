@@ -11,7 +11,7 @@ use jni::{
 };
 
 use crate::{
-    call_method, debug_assert, get_field,
+    call_method, debug_assert, device, get_field,
     hardware::{IntoJniObject, limelight::results::LLResult},
     index_jlist, jlist, new_global, todo,
 };
