@@ -17,21 +17,25 @@ extern crate proc_macro;
 #[derive(Debug, Clone)]
 enum FtcArg {
     Name(String, Span),
+    Description(String, Span),
     Linear(Span),
     Iterative(Span),
     Teleop(Span),
     Autonomous(Span),
+    Utility(Span),
     Group(String, Span),
     Disabled(Span),
 }
 
 impl FtcArg {
     pub const fn get_span(&self) -> &Span {
-        use FtcArg::{Autonomous, Disabled, Group, Iterative, Linear, Name, Teleop};
+        use FtcArg::{Autonomous, Description, Disabled, Group, Iterative, Linear, Name, Teleop, Utility};
         match self {
             Name(_, span)
+            | Description(_, span)
             | Linear(span)
             | Iterative(span)
+            | Utility(span)
             | Teleop(span)
             | Autonomous(span)
             | Group(_, span)
@@ -39,11 +43,13 @@ impl FtcArg {
         }
     }
     pub const fn get_name(&self) -> &'static str {
-        use FtcArg::{Autonomous, Disabled, Group, Iterative, Linear, Name, Teleop};
+        use FtcArg::{Autonomous, Description, Disabled, Group, Iterative, Linear, Name, Teleop, Utility};
         match self {
             Name(_, _) => "name",
+            Description(_, _) => "description",
             Linear(_) => "linear",
             Iterative(_) => "iterative",
+            Utility(_) => "utility",
             Teleop(_) => "teleop",
             Autonomous(_) => "auto",
             Group(_, _) => "group",
@@ -74,10 +80,11 @@ impl Parse for FtcArg {
             Ok(match name.as_str() {
                 "linear" => FtcArg::Linear(name_ident.span()),
                 "iterative" => FtcArg::Iterative(name_ident.span()),
+                "utility" => FtcArg::Utility(name_ident.span()),
                 "teleop" => FtcArg::Teleop(name_ident.span()),
                 "auto" => FtcArg::Autonomous(name_ident.span()),
                 "disabled" => FtcArg::Disabled(name_ident.span()),
-                "name" | "group" => {
+                "name" | "group" | "description" => {
                     let lookahead = input.lookahead1();
                     if lookahead.peek(Token![=]) {
                         let _: Token![=] = input.parse()?;
@@ -87,6 +94,8 @@ impl Parse for FtcArg {
                             let lit: LitStr = input.parse()?;
                             if name.as_str() == "name" {
                                 FtcArg::Name(lit.value(), name_ident.span())
+                            } else if name.as_str() == "description" {
+                                FtcArg::Description(lit.value(), name_ident.span())
                             } else {
                                 FtcArg::Group(lit.value(), name_ident.span())
                             }
@@ -100,7 +109,7 @@ impl Parse for FtcArg {
                 _ => {
                     return Err(Error::new(
                         name_ident.span(),
-                        "ident should be one of linear, iterative, teleop, auto, disabled, name, \
+                        "ident should be one of linear, iterative, teleop, auto, utility, description, disabled, name, \
                          or group",
                     ));
                 }
@@ -210,8 +219,10 @@ pub fn ftc(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let mut name = None;
     let mut group = None;
+    let mut description = None;
     let mut linear = false;
     let mut iterative = false;
+    let mut utility = false;
     let mut teleop = false;
     let mut autonomous = false;
     let mut disabled = false;
@@ -219,8 +230,10 @@ pub fn ftc(attr: TokenStream, item: TokenStream) -> TokenStream {
     for arg in args {
         match arg {
             FtcArg::Name(v, _) => name = Some(v),
+            FtcArg::Description(v, _) => description = Some(v),
             FtcArg::Linear(_) => linear = true,
             FtcArg::Iterative(_) => iterative = true,
+            FtcArg::Utility(_) => utility = true,
             FtcArg::Teleop(_) => teleop = true,
             FtcArg::Autonomous(_) => autonomous = true,
             FtcArg::Group(v, _) => group = Some(v),
@@ -228,19 +241,42 @@ pub fn ftc(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
-    if !(teleop || autonomous) {
+    if !(teleop || autonomous || utility) {
         return Error::new(
             func.span(),
-            "an op mode must either be teleop or autonomous, not neither",
+            "an op mode must either be teleop, autonomous, or utility, not none of them",
         )
         .into_compile_error()
         .into();
     }
 
-    if teleop && autonomous {
+    if [teleop, autonomous, utility]
+        .into_iter()
+        .filter(|v| *v)
+        .count()
+        > 1
+    {
         return Error::new(
             func.span(),
-            "an op mode must either be teleop or autonomous, not both",
+            "an op mode must either be teleop, autonomous, or utility, not more than one",
+        )
+        .into_compile_error()
+        .into();
+    }
+
+    if group.is_some() && utility {
+        return Error::new(
+            func.span(),
+            "utility op modes cannot be in groups",
+        )
+        .into_compile_error()
+        .into();
+    }
+
+    if description.is_some() && !utility {
+        return Error::new(
+            func.span(),
+            "non-utility op modes cannot have a description",
         )
         .into_compile_error()
         .into();
@@ -293,7 +329,7 @@ import com.qualcomm.robotcore.eventloop.opmode.{};
 import com.qualcomm.robotcore.eventloop.opmode.{};
 import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 
-@{1}(name = "{}"{})
+@{1}(name = "{}"{}{})
 {}
 public class {class_name} extends {2} {{
     private long rust_id;
@@ -305,11 +341,16 @@ public class {class_name} extends {2} {{
 }}
 "#,
         env!("CARGO_PKG_VERSION"),
-        if teleop { "TeleOp" } else { "Autonomous" },
+        if teleop { "TeleOp" } else if utility { "Utility" } else { "Autonomous" },
         if iterative { "OpMode" } else { "LinearOpMode" },
         name,
         if let Some(group) = group {
             format!(", group = \"{group}\"")
+        } else {
+            String::new()
+        },
+        if let Some(description) = description {
+            format!(", description = \"{description}\"")
         } else {
             String::new()
         },

@@ -1,6 +1,6 @@
 [package]
 name = "ftc"
-version = "11.1.1"
+version = "11.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Library for running Rust code on FTC robots."
@@ -9,7 +9,7 @@ keywords = ["robot", "robotics", "first-robotics"]
 categories = ["science::robotics"]
 
 [package.metadata.ftc]
-controller_version = "11.1"
+controller_version = "11.2"
 
 [dependencies]
 android_logger = "0.15.1"
