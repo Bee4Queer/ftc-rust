@@ -72,7 +72,7 @@ impl Telemetry {
     #[allow(clippy::needless_pass_by_value)]
     pub fn add_data(&self, caption: impl ToString, value: impl ToString) {
         info!(
-            "new telemetry data posted: {} - {}",
+            "telemetry: {} - {}",
             caption.to_string(),
             value.to_string()
         );
@@ -100,7 +100,6 @@ impl Telemetry {
     /// transmission interval expires.
     pub fn update(&self) {
         trace!("updating telemetry");
-
         call_method!(
             void self,
             self.telemetry,
@@ -111,7 +110,6 @@ impl Telemetry {
     }
     /// Removes all items from the receiver whose value is not to be retained.
     pub fn clear(&self) {
-        trace!("clearing telemetry");
         call_method!(
             void self,
             self.telemetry,
@@ -122,7 +120,6 @@ impl Telemetry {
     }
     /// Removes all items, lines, and actions from the receiver.
     pub fn clear_all(&self) {
-        trace!("clearing all telemetry");
         call_method!(
             void self,
             self.telemetry,
@@ -827,7 +824,7 @@ pub struct OpModeNameFormatter(pub &'static str, pub &'static Location<'static>)
 
 impl Debug for OpModeNameFormatter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "opmode {} @ {}", self.0, self.1)
+        write!(f, "opmode @ {} {}", self.1, self.0)
     }
 }
 
@@ -840,7 +837,9 @@ static STATE: LazyLock<Mutex<HashMap<OpModeId, Vec<DynState>>>> =
 static SOURCE_INFO: LazyLock<Mutex<HashMap<OpModeId, (&'static str, &'static Location<'static>)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static CURRENT_OPMODE: Mutex<OpModeId> = Mutex::new(OpModeId(0));
+static CURRENT_OPMODE_ID: Mutex<OpModeId> = Mutex::new(OpModeId(0));
+
+static CURRENT_PANIC_TEXT: Mutex<Option<String>> = Mutex::new(None);
 
 /// Counter used to assign IDs to opmodes. Starts at 1 as 0 is used to mark that an ID hasn't been
 /// assigned.
@@ -900,6 +899,10 @@ impl FtcContext {
             },
         ));
 
+        std::panic::set_hook(Box::new(|info| {
+            *CURRENT_PANIC_TEXT.lock() = Some(info.to_string());
+        }));
+
         info!("Rust FTC initalized");
 
         Self::new_no_log(env, this, kind, name, source)
@@ -936,7 +939,7 @@ impl FtcContext {
                 })
                 .unwrap();
         }
-        *CURRENT_OPMODE.lock() = out.id();
+        *CURRENT_OPMODE_ID.lock() = out.id();
         out
     }
     /// Get the name of the opmode currently running.
@@ -992,7 +995,7 @@ impl FtcContext {
                 OpModeNameFormatter(info.0, info.1)
             )
         }
-        *CURRENT_OPMODE.lock() = id;
+        *CURRENT_OPMODE_ID.lock() = id;
 
         id
     }

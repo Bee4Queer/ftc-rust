@@ -1,27 +1,13 @@
 //! JNI error policy that includes `PanicInfo` as a type here as well as `String`.
 
-use core::panic::PanicInfo;
-use std::{
-    any::Any,
-    panic::{AssertUnwindSafe, catch_unwind},
-};
-
 use jni::{Env, errors::ErrorPolicy};
-use log::info;
 
-use crate::CURRENT_OPMODE;
+use crate::{CURRENT_OPMODE_ID, CURRENT_PANIC_TEXT};
 
 /// Version of the base JNI crate type that actually supports string types that
 /// aren't &'static str.
 #[derive(Debug, Default)]
 pub struct ThrowRuntimeExAndDefault;
-
-/// Attempt to get a string for the provided panic payload
-fn try_get_string_for_t<T: ToString + 'static>(
-    payload: &(dyn Any + Send + 'static),
-) -> Option<String> {
-    payload.downcast_ref::<T>().map(ToString::to_string)
-}
 
 impl<T: Default, E: std::error::Error> ErrorPolicy<T, E> for ThrowRuntimeExAndDefault {
     type Captures<'unowned_env_local: 'native_method, 'native_method> = (); // no captures
@@ -46,29 +32,13 @@ impl<T: Default, E: std::error::Error> ErrorPolicy<T, E> for ThrowRuntimeExAndDe
     fn on_panic<'unowned_env_local: 'native_method, 'native_method>(
         env: &mut Env<'unowned_env_local>,
         _cap: &mut Self::Captures<'unowned_env_local, 'native_method>,
-        payload: Box<dyn std::any::Any + Send + 'static>,
+        _payload: Box<dyn std::any::Any + Send + 'static>,
     ) -> jni::errors::Result<T> {
-        info!("got here");
-        let panic_string = try_get_string_for_t::<&'static str>(&payload)
-            .or_else(|| try_get_string_for_t::<String>(&payload))
-            .or_else(|| try_get_string_for_t::<PanicInfo>(&payload))
-            .unwrap_or_else(|| {
-                // Since it's possible that dropping a panic payload may itself panic,
-                // we catch any panic and fallback to forgetting/leaking the payload.
-                if let Err(drop_panic) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
-                    log::error!("Panic while dropping panic payload: {drop_panic:?}");
-                    std::mem::forget(drop_panic);
-                    "unknown type panic payload (panicked again while dropping)".to_string()
-                } else {
-                    "unknown type panic payload".to_string()
-                }
-            });
-
         // Note: `env.throw()` will return `Err(Error::JavaException)` after throwing
         // but in this case (where we are going to be letting the exception
         // propagate to Java), we want to ensure we don't return that as an
         // error
-        let _ = env.throw(format!("panic @ opmode {:?}: {panic_string}", *CURRENT_OPMODE.lock()));
+        let _ = env.throw(format!("panic @ {:?}: {}", *CURRENT_OPMODE_ID.lock(), CURRENT_PANIC_TEXT.lock().take().unwrap()));
         Ok(T::default())
     }
 }
