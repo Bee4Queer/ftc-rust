@@ -22,7 +22,7 @@ pub mod limelight;
 pub mod sensors;
 use log::{error, trace};
 
-use crate::{call_method, debug_assert, get_field, new_global, new_string, unimplemented};
+use crate::{call_method, get_field, new_global, new_string};
 
 /// Easily define a basic device.
 #[macro_export]
@@ -56,7 +56,7 @@ macro_rules! device {
             type Target = $crate::hardware::HardwareDevice;
             fn deref(&self) -> &Self::Target {
                 let Some(out) = &self.inner.as_ref() else {
-                    $crate::panic!("tried to dereference a null pointer");
+                    panic!("tried to dereference a null pointer");
                 };
                 out
             }
@@ -86,7 +86,70 @@ macro_rules! device {
                 }
             }
         }
-        impl $crate::hardware::MacroedDevice for $name {}
+        impl $crate::hardware::ExtendableDevice for $name {
+            fn vm(&self) -> &jni::JavaVM {
+                &self.vm
+            }
+            fn object(&self) -> &jni::objects::Global<jni::objects::JObject<'static>> {
+                &self.object
+            }
+        }
+    };
+    {$(#[$attr:meta])* $name:ident wraps $wraps:path $(,)?} => {
+        const _: () = {
+            const fn test_extends<T: $crate::hardware::ExtendableDevice + core::fmt::Debug>() {}
+            test_extends::<$wraps>();
+        };
+        $(#[$attr])*
+        #[derive(Clone, Default)]
+        #[repr(transparent)]
+        pub struct $name {
+            inner: $wraps
+        }
+
+        impl $name {
+            /// Returns whether this device is a null pointer.
+            #[must_use]
+            pub fn is_null(&self) -> bool {
+                self.inner.is_null()
+            }
+        }
+
+        impl ::std::ops::Deref for $name {
+            type Target = $crate::hardware::HardwareDevice;
+            fn deref(&self) -> &Self::Target {
+                &*self.inner
+            }
+        }
+
+        impl ::std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                if self.is_null() {
+                    return f.write_str(concat!("(null ", stringify!($name), " reference)"));
+                }
+                f.debug_tuple(stringify!($name))
+                    .field(&self.inner)
+                    .finish()
+            }
+        }
+
+        impl $crate::hardware::Device for $name {
+            const JAVA_CLASS: &'static str = <$wraps>::JAVA_CLASS;
+            const JNI_CLASS: &'static str = <$wraps>::JNI_CLASS;
+            fn from_java(vm: $crate::jni::JavaVM, object: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>) -> Self {
+                Self {
+                    inner: <$wraps>::from_java(vm, object)
+                }
+            }
+        }
+        impl $crate::hardware::ExtendableDevice for $name {
+            fn vm(&self) -> &jni::JavaVM {
+                &self.vm
+            }
+            fn object(&self) -> &jni::objects::Global<jni::objects::JObject<'static>> {
+                &self.object
+            }
+        }
     };
 }
 
@@ -126,8 +189,13 @@ pub trait Device: Default {
     }
 }
 
-#[doc(hidden)]
-pub trait MacroedDevice: Device {}
+/// A device that can be extended or wrapped around automatically.
+pub trait ExtendableDevice: Device {
+    /// Get the VM of the device.
+    fn vm(&self) -> &JavaVM;
+    /// Get the object of the device.
+    fn object(&self) -> &Global<JObject<'static>>;
+}
 
 /// A wrapper for accessing hardware-related methods.
 #[doc(alias = "HardwareMap")]

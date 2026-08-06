@@ -1,5 +1,6 @@
-//! JNI error policy that's actually reasonable.
+//! JNI error policy that includes `PanicInfo` as a type here as well as `String`.
 
+use core::panic::PanicInfo;
 use std::{
     any::Any,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -7,6 +8,8 @@ use std::{
 
 use jni::{Env, errors::ErrorPolicy};
 use log::info;
+
+use crate::CURRENT_OPMODE;
 
 /// Version of the base JNI crate type that actually supports string types that
 /// aren't &'static str.
@@ -48,21 +51,24 @@ impl<T: Default, E: std::error::Error> ErrorPolicy<T, E> for ThrowRuntimeExAndDe
         info!("got here");
         let panic_string = try_get_string_for_t::<&'static str>(&payload)
             .or_else(|| try_get_string_for_t::<String>(&payload))
+            .or_else(|| try_get_string_for_t::<PanicInfo>(&payload))
             .unwrap_or_else(|| {
                 // Since it's possible that dropping a panic payload may itself panic,
                 // we catch any panic and fallback to forgetting/leaking the payload.
                 if let Err(drop_panic) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
                     log::error!("Panic while dropping panic payload: {drop_panic:?}");
                     std::mem::forget(drop_panic);
+                    "unknown type panic payload (panicked again while dropping)".to_string()
+                } else {
+                    "unknown type panic payload".to_string()
                 }
-                "non-string panic payload".to_string()
             });
 
         // Note: `env.throw()` will return `Err(Error::JavaException)` after throwing
         // but in this case (where we are going to be letting the exception
         // propagate to Java), we want to ensure we don't return that as an
         // error
-        let _ = env.throw(format!("Rust panic: {panic_string}"));
+        let _ = env.throw(format!("panic @ opmode {:?}: {panic_string}", *CURRENT_OPMODE.lock()));
         Ok(T::default())
     }
 }

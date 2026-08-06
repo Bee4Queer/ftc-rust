@@ -11,9 +11,9 @@ use jni::{
 };
 
 use crate::{
-    call_method, debug_assert, device, get_field,
+    call_method, device, get_field,
     hardware::{IntoJniObject, limelight::results::LLResult},
-    index_jlist, jlist, new_global, todo,
+    index_jlist, jlist, new_global,
 };
 
 device!(
@@ -686,7 +686,7 @@ pub mod results {
     use crate::{
         call_method, call_method_vm, get_field,
         hardware::{IntoJniObject, Pose3D, limelight::LLTimestamp},
-        index_jlist, jlist_f64, jlist_map, unimplemented,
+        index_jlist, jlist_f64, jlist_map,
     };
 
     #[derive(Clone, Debug, PartialEq)]

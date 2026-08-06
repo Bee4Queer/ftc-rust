@@ -5,7 +5,9 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     hash::Hash,
+    hint::cold_path,
     marker::PhantomData,
+    panic::Location,
     sync::{Arc, LazyLock, atomic::AtomicI64},
     time::Duration,
 };
@@ -29,6 +31,16 @@ use crate::{
     command::{Command, SCHEDULER},
     hardware::{Hardware, IntoJniObject},
 };
+
+/// Commonly used items.
+pub mod prelude {
+    pub use log::{debug, error, info, trace, warn};
+
+    pub use crate::{
+        Button, FtcContext, Gamepad, IterativeContext, OpModeStage, OpModeType, Telemetry,
+        command::Command, device, hardware::*,
+    };
+}
 
 pub mod command;
 pub mod hardware;
@@ -771,10 +783,53 @@ pub struct FtcContext {
     this: Global<JObject<'static>>,
     /// The type of this op mode.
     kind: OpModeType,
+    /// The name of this op mode.
+    name: &'static str,
+    /// The location of the function that is this op mode.
+    source: &'static Location<'static>,
 }
 
 /// Internal ID of an opmode. Used for storing user state internally.
-pub type OpModeId = i64;
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OpModeId(i64);
+
+impl OpModeId {
+    /// Get the name of this op mode.
+    pub fn name(self) -> &'static str {
+        SOURCE_INFO.lock().get(&self).unwrap().0
+    }
+    /// Get the source of this op mode.
+    pub fn source(self) -> &'static Location<'static> {
+        SOURCE_INFO.lock().get(&self).unwrap().1
+    }
+}
+
+impl Debug for OpModeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Some((name, source)) = SOURCE_INFO.lock().get(self).copied() else {
+            return write!(
+                f,
+                "(unknown opmode{})",
+                if self.0 == 0 {
+                    String::new()
+                } else {
+                    format!(" w/ ID {}", self.0)
+                }
+            );
+        };
+        OpModeNameFormatter(name, source).fmt(f)
+    }
+}
+
+/// Format the name and source of an opmode.
+#[derive(Clone, Copy)]
+pub struct OpModeNameFormatter(pub &'static str, pub &'static Location<'static>);
+
+impl Debug for OpModeNameFormatter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "opmode {} @ {}", self.0, self.1)
+    }
+}
 
 /// Internal representation of a state.
 type DynState = Box<dyn Any + Send + Sync + 'static>;
@@ -782,8 +837,13 @@ type DynState = Box<dyn Any + Send + Sync + 'static>;
 /// User state
 static STATE: LazyLock<Mutex<HashMap<OpModeId, Vec<DynState>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static SOURCE_INFO: LazyLock<Mutex<HashMap<OpModeId, (&'static str, &'static Location<'static>)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Counter used to assign IDs to opmodes. Starts at 1 as 0 is used to mark that an ID hasn't been assigned.
+static CURRENT_OPMODE: Mutex<OpModeId> = Mutex::new(OpModeId(0));
+
+/// Counter used to assign IDs to opmodes. Starts at 1 as 0 is used to mark that an ID hasn't been
+/// assigned.
 static OPMODE_COUNTER: AtomicI64 = AtomicI64::new(1);
 
 impl Debug for FtcContext {
@@ -801,6 +861,8 @@ impl Clone for FtcContext {
                 .unwrap(),
             vm: self.vm.clone(),
             kind: self.kind,
+            name: self.name,
+            source: self.source,
         }
     }
 }
@@ -811,33 +873,55 @@ impl Hash for FtcContext {
     }
 }
 
+impl Eq for FtcContext {}
+
+impl PartialEq for FtcContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
+}
+
 impl FtcContext {
     /// Create a new context.
     #[doc(hidden)]
     #[must_use]
-    pub fn new<'local>(env: &mut jni::Env<'local>, this: JObject<'local>, kind: OpModeType) -> Self {
+    pub fn new<'local>(
+        env: &mut jni::Env<'local>,
+        this: JObject<'local>,
+        kind: OpModeType,
+        name: &'static str,
+        source: &'static Location<'static>,
+    ) -> Self {
         android_logger::init_once(android_logger::Config::default().with_max_level(
             if cfg!(debug_assertions) {
                 log::LevelFilter::Trace
             } else {
-                log::LevelFilter::Warn
+                log::LevelFilter::Info
             },
         ));
 
         info!("Rust FTC initalized");
 
-        Self::new_no_log(env, this, kind)
+        Self::new_no_log(env, this, kind, name, source)
     }
     /// Create a new context.
     #[doc(hidden)]
     #[must_use]
-    pub fn new_no_log<'local>(env: &mut jni::Env<'local>, this: JObject<'local>, kind: OpModeType) -> Self {
+    pub fn new_no_log<'local>(
+        env: &mut jni::Env<'local>,
+        this: JObject<'local>,
+        kind: OpModeType,
+        name: &'static str,
+        source: &'static Location<'static>,
+    ) -> Self {
         let out = Self {
             this: env.new_global_ref(this).unwrap(),
             vm: env.get_java_vm().unwrap(),
             kind,
+            name,
+            source,
         };
-        if out.id() == 0 {
+        if out.id() == OpModeId(0) {
             out.vm
                 .attach_current_thread(|env| {
                     env.set_field(
@@ -852,7 +936,16 @@ impl FtcContext {
                 })
                 .unwrap();
         }
+        *CURRENT_OPMODE.lock() = out.id();
         out
+    }
+    /// Get the name of the opmode currently running.
+    pub fn opmode_name(&self) -> &'static str {
+        self.name
+    }
+    /// Get the source location of the opmode currently running.
+    pub fn opmode_source(&self) -> &'static Location<'static> {
+        self.source
     }
     /// Call a method with the state of this context. Each op mode can have any number of states.
     pub fn with_state<State: Any + Default + Send + Sync + 'static, R>(
@@ -875,16 +968,33 @@ impl FtcContext {
     /// Get the unique ID for this opmode.
     #[must_use]
     pub fn id(&self) -> OpModeId {
-        self.vm
-            .attach_current_thread(|env| {
-                let local_ref = env.new_local_ref(&self.this)?;
-                jni::errors::Result::Ok(
-                    env.get_field(local_ref, jni_str!("rust_id"), jni_sig!("J"))?
-                        .into_long()
-                        .unwrap(),
-                )
-            })
-            .unwrap()
+        let id = OpModeId(
+            self.vm
+                .attach_current_thread(|env| {
+                    let local_ref = env.new_local_ref(&self.this)?;
+                    jni::errors::Result::Ok(
+                        env.get_field(local_ref, jni_str!("rust_id"), jni_sig!("J"))?
+                            .into_long()
+                            .unwrap(),
+                    )
+                })
+                .unwrap(),
+        );
+
+        if let Some(info) = SOURCE_INFO.lock().insert(id, (self.name, self.source))
+            && info != (self.name, self.source)
+        {
+            cold_path(); // I don't even KNOW how this would happen
+            warn!(
+                "multiple op modes with same ID! currently executing op mode is {:?}, other op \
+                 mode is {:?}! How did you do this??",
+                OpModeNameFormatter(self.name, self.source),
+                OpModeNameFormatter(info.0, info.1)
+            )
+        }
+        *CURRENT_OPMODE.lock() = id;
+
+        id
     }
     /// Whether the currently running opmode is iterative.
     #[must_use]
@@ -1195,10 +1305,16 @@ impl IterativeContext<*const ()> {
         }
     }
     #[doc(hidden)]
-    pub fn get_for<'local>(env: &mut jni::Env<'local>, this: &JObject<'local>, kind: OpModeType) -> Self {
+    pub fn get_for<'local>(
+        env: &mut jni::Env<'local>,
+        this: &JObject<'local>,
+        kind: OpModeType,
+        name: &'static str,
+        source: &'static Location<'static>,
+    ) -> Self {
         let this = env.new_local_ref(this).unwrap();
 
-        let id = FtcContext::new_no_log(env, this, kind).id();
+        let id = FtcContext::new_no_log(env, this, kind, name, source).id();
         match ITERATIVE_CONTEXTS.lock().entry(id) {
             std::collections::hash_map::Entry::Occupied(occupied_entry) => {
                 occupied_entry.get().clone()
@@ -1249,180 +1365,6 @@ impl IterativeContext<*const ()> {
 }
 
 pub mod policy;
-
-/// Better `panic!` that outputs a message through log since panics don't really
-/// work with the JNI
-#[macro_export]
-macro_rules! panic {
-    () => {
-        $crate::panic!("explicit panic");
-    };
-    ($($arg:tt)+) => {
-        {
-            let s = format!($($arg)*);
-            $crate::log::error!("{s}");
-            ::std::panic!("{s}");
-        }
-    };
-}
-
-/// Better `unimplemented!` that outputs a message through log since panics
-/// don't really work with the JNI
-#[macro_export]
-macro_rules! unimplemented {
-    () => {
-        $crate::panic!("not implemented")
-    };
-    ($($arg:tt)+) => {
-        $crate::panic!("not implemented: {}", ::std::format_args!($($arg)+))
-    };
-}
-
-/// Better `todo!` that outputs a message through log since panics don't really
-/// work with the JNI
-#[macro_export]
-macro_rules! todo {
-    () => {
-        $crate::panic!("not yet implemented")
-    };
-    ($($arg:tt)+) => {
-        $crate::panic!("not yet implemented: {}", ::std::format_args!($($arg)+))
-    };
-}
-
-/// Better `unreachable!` that outputs a message through log since panics don't
-/// really work with the JNI
-#[macro_export]
-macro_rules! unreachable {
-    () => {
-        $crate::panic!("nternal error: entered unreachable code")
-    };
-    ($($arg:tt)+) => {
-        $crate::panic!("nternal error: entered unreachable code: {}", ::std::format_args!($($arg)+))
-    };
-}
-
-/// Better `assert!` that outputs a message through log since panics don't
-/// really work with the JNI
-#[macro_export]
-macro_rules! assert {
-    ($condition:expr $(,)?) => {
-        {let cond: bool = $condition;
-        if (!cond) {
-            let s = concat!("assert at ", ::std::file!(), ":", ::std::line!(), ":", ::std::column!(), " failed");
-            $crate::log::error!("{s}");
-            ::std::panic!("{s}");
-        }}
-    };
-    ($condition:expr, $($tt:tt)+) => {
-        {let cond: bool = $condition;
-        if (!cond) {
-            let s = format!("{}{}", concat!("assert at ", ::std::file!(), ":", ::std::line!(), ":", ::std::column!(), " failed: "), format!($($tt)+));
-            $crate::log::error!("{s}");
-            ::std::panic!("{s}");
-        }}
-    };
-}
-
-/// Better `assert_eq!` that outputs a message through log since panics don't
-/// really work with the JNI
-#[macro_export]
-macro_rules! assert_eq {
-    ($val1:expr, $val2:expr $(,)?) => {
-        $crate::assert!($val1 == $val2)
-    };
-    ($val1:expr, $val2:expr, $($tt:tt)+) => {
-        $crate::assert!($val1 == $val2, $($tt)+)
-    };
-}
-
-/// Better `assert_ne!` that outputs a message through log since panics don't
-/// really work with the JNI
-#[macro_export]
-macro_rules! assert_ne {
-    ($val1:expr, $val2:expr $(,)?) => {
-        $crate::assert!($val1 != $val2)
-    };
-    ($val1:expr, $val2:expr, $($tt:tt)+) => {
-        $crate::assert!($val1 != $val2, $($tt)+)
-    };
-}
-
-/// Better `assert_matches!` that outputs a message through log since panics
-/// don't really work with the JNI
-#[macro_export]
-macro_rules! assert_matches {
-    ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
-        $crate::assert!(matches!($expression, $pattern $(if $guard)?))
-    };
-    ($expression:expr, $pattern:pat $(if $guard:expr)?, $($tt:tt)+) => {
-        $crate::assert!(matches!($expression, $pattern $(if $guard)?), $($tt)+)
-    };
-}
-
-/// Better `debug_assert!` that outputs a message through log since panics don't
-/// really work with the JNI
-#[macro_export]
-macro_rules! debug_assert {
-    ($condition:expr $(,)?) => {
-        if ::std::cfg!(debug_assertions) {
-            $crate::assert!($condition);
-        }
-    };
-    ($condition:expr, $($tt:tt)+) => {
-        if ::std::cfg!(debug_assertions) {
-            $crate::assert!($condition, $($tt)+);
-        }
-    };
-}
-
-/// Better `debug_assert_eq!` that outputs a message through log since panics
-/// don't really work with the JNI
-#[macro_export]
-macro_rules! debug_assert_eq {
-    ($val1:expr, $val2:expr $(,)?) => {
-        if ::std::cfg!(debug_assertions) {
-            $crate::assert!($val1 == $val2);
-        }
-    };
-    ($val1:expr, $val2:expr, $($tt:tt)+) => {
-        if ::std::cfg!(debug_assertions) {
-            $crate::assert!($val1 == $val2, $($tt)+);
-        }
-    };
-}
-
-/// Better `debug_assert_ne!` that outputs a message through log since panics
-/// don't really work with the JNI
-#[macro_export]
-macro_rules! debug_assert_ne {
-    ($val1:expr, $val2:expr $(,)?) => {
-        if ::std::cfg!(debug_assertions) {
-            $crate::assert!($val1 != $val2);
-        }
-    };
-    ($val1:expr, $val2:expr, $($tt:tt)+) => {
-        if ::std::cfg!(debug_assertions) {
-            $crate::assert!($val1 != $val2, $($tt)+);
-        }
-    };
-}
-
-/// Better `assert_matches!` that outputs a message through log since panics
-/// don't really work with the JNI
-#[macro_export]
-macro_rules! debug_assert_matches {
-    ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
-        if ::std::cfg!(debug_assertions) {
-            $crate::assert!(matches!($expression, $pattern $(if $guard)?));
-        }
-    };
-    ($expression:expr, $pattern:pat $(if $guard:expr)?, $($tt:tt)+) => {
-        if ::std::cfg!(debug_assertions) {
-            $crate::assert!(matches!($expression, $pattern $(if $guard)?), $($tt)+);
-        }
-    };
-}
 
 /// Make a `Vec<T>` where T is a JNI object from a `JList`.
 ///
