@@ -2,8 +2,9 @@
 
 use std::{
     any::Any,
+    cell::Cell,
     collections::HashMap,
-    fmt::Debug,
+    fmt::{Debug, Display},
     hash::Hash,
     hint::cold_path,
     marker::PhantomData,
@@ -25,7 +26,7 @@ use jni::{
 };
 pub use log;
 use log::{info, trace, warn};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::{
     command::{Command, SCHEDULER},
@@ -60,7 +61,7 @@ pub struct Telemetry {
 
 impl Debug for Telemetry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("(opaque Telemetry object)")
+        f.write_str("(telemetry)")
     }
 }
 
@@ -69,17 +70,26 @@ impl Telemetry {
     /// display. The caption and value are shown on the driver station
     /// separated by the caption value separator. The item is removed if
     /// `clear` or `clear_all` is called.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn add_data(&self, caption: impl ToString, value: impl ToString) {
-        info!(
-            "telemetry: {} - {}",
-            caption.to_string(),
-            value.to_string()
-        );
+    ///
+    /// ```no_run
+    /// # #[ftc::ftc_test()]
+    /// # fn opmode(ftc: &ftc::FtcContext) {
+    /// # let telemetry = ftc.telemetry();
+    /// telemetry.add_data("Status", "Initialized");
+    /// telemetry.add_data("We are".to_string(), "Anonymous");
+    /// telemetry.add_data("Answer to life, the universe, and everything", 42);
+    /// telemetry.update();
+    /// # }
+    /// ```
+    // Caption generally should be a string, so this makes that more obvious,
+    // while still allowing the value to be whatever.
+    pub fn add_data(&self, caption: impl AsRef<str>, value: impl Display) {
+        let caption = caption.as_ref();
+        info!("telemetry: {} - {}", caption, value);
 
         self.vm
             .attach_current_thread(|env| {
-                let caption = new_string!(env env, caption.to_string())?;
+                let caption = new_string!(env env, caption)?;
                 let value = new_string!(env env, value.to_string())?;
                 call_method!(
                     env env,
@@ -144,7 +154,10 @@ pub struct Gamepad {
 
 impl Debug for Gamepad {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("(opaque Gamepad object)")
+        f.write_str(match self.which {
+            WhichGamepad::Gamepad1 => "gamepad1",
+            WhichGamepad::Gamepad2 => "gamepad2",
+        })
     }
 }
 
@@ -168,7 +181,7 @@ fn snake_to_camel(s: &str) -> String {
 }
 
 /// A controller button.
-#[allow(missing_docs, reason = "idgaf")]
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Button {
     A,
@@ -207,7 +220,7 @@ pub enum Button {
     RightTrigger,
 }
 
-#[allow(missing_docs, reason = "idgaf")]
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Stick {
     LeftStickX,
@@ -226,14 +239,23 @@ pub enum Stick {
     TouchpadFinger2Y,
 }
 
-#[allow(missing_docs, reason = "idgaf")]
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WhichGamepad {
     Gamepad1,
     Gamepad2,
 }
 
-#[allow(missing_docs, reason = "idgaf")]
+impl Display for WhichGamepad {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Gamepad1 => "gamepad1",
+            Self::Gamepad2 => "gamepad2",
+        })
+    }
+}
+
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PressEdge {
     Press,
@@ -258,10 +280,16 @@ pub struct ButtonCommand<F: FnMut(PressEdge) + 'static + Send + Sync> {
 }
 
 impl<F: FnMut(PressEdge) + 'static + Send + Sync> Command for ButtonCommand<F> {
+    fn name(&self) -> String {
+        format!(
+            "ButtonCommand<{}, {:?}, {:?}>",
+            self.gamepad, self.button, self.edge,
+        )
+    }
     fn execute(&mut self, _: &FtcContext) {
         (self.f)(self.edge);
     }
-    fn try_run(&mut self, ctx: &FtcContext) -> bool {
+    fn try_run(&self, ctx: &FtcContext) -> bool {
         let gamepad = match self.gamepad {
             WhichGamepad::Gamepad1 => ctx.gamepad1(),
             WhichGamepad::Gamepad2 => ctx.gamepad2(),
@@ -293,6 +321,15 @@ pub struct StickCommand<F: FnMut(f32) + 'static + Send + Sync> {
 }
 
 impl<F: FnMut(f32) + 'static + Send + Sync> Command for StickCommand<F> {
+    fn name(&self) -> String {
+        format!(
+            "StickCommand<{}, {:?}, {}{}>",
+            self.gamepad,
+            self.stick,
+            if self.abs { "±" } else { "" },
+            self.threshold,
+        )
+    }
     fn execute(&mut self, ctx: &FtcContext) {
         let gamepad = match self.gamepad {
             WhichGamepad::Gamepad1 => ctx.gamepad1(),
@@ -303,7 +340,7 @@ impl<F: FnMut(f32) + 'static + Send + Sync> Command for StickCommand<F> {
 
         (self.f)(value);
     }
-    fn try_run(&mut self, ctx: &FtcContext) -> bool {
+    fn try_run(&self, ctx: &FtcContext) -> bool {
         let gamepad = match self.gamepad {
             WhichGamepad::Gamepad1 => ctx.gamepad1(),
             WhichGamepad::Gamepad2 => ctx.gamepad2(),
@@ -346,13 +383,13 @@ macro_rules! gamepad_button {
 
         #[doc = concat!("Checks if ", stringify!($name), " was pressed since the last call of this method")]
         #[must_use]
-        $vis fn [< $name _was_pressed >] (&self) -> bool {
+        $vis fn [< $name _just_pressed >] (&self) -> bool {
             call_method!(bool self, self.gamepad, snake_to_camel(stringify!($name)) + "WasPressed", "()Z", [])
         }
 
         #[doc = concat!("Checks if ", stringify!($name), " was released since the last call of this method")]
         #[must_use]
-        $vis fn [< $name _was_released >] (&self) -> bool {
+        $vis fn [< $name _just_released >] (&self) -> bool {
             call_method!(bool self, self.gamepad, snake_to_camel(stringify!($name)) + "WasReleased", "()Z", [])
         }
 
@@ -363,26 +400,6 @@ macro_rules! gamepad_button {
             edge: PressEdge
         ) {
             self.execute_on(Button:: $ty_name, f, edge);
-        }
-
-        #[doc = concat!("Runs the provided function whenever ", stringify!($name), " is pressed.")]
-        $vis fn [< on_press_ $name >] (&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-            self.[< execute_on_ $name >] (f, PressEdge::Press);
-        }
-
-        #[doc = concat!("Runs the provided function whenever ", stringify!($name), " is released.")]
-        $vis fn [< on_release_ $name >] (&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-            self.[< execute_on_ $name >] (f, PressEdge::Release);
-        }
-
-        #[doc = concat!("Runs the provided function while ", stringify!($name), " is pressed.")]
-        $vis fn [< while_press_ $name >] (&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-            self.[< execute_on_ $name >] (f, PressEdge::WhilePressed);
-        }
-
-        #[doc = concat!("Runs the provided function while ", stringify!($name), " is released.")]
-        $vis fn [< while_release_ $name >] (&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-            self.[< execute_on_ $name >] (f, PressEdge::WhileReleased);
         })*
         /// Return whether the specified button is pressed.
         #[must_use]
@@ -397,7 +414,7 @@ macro_rules! gamepad_button {
         #[must_use]
         pub fn was_pressed(&self, button: Button) -> bool {
             match button {
-                $(Button:: $ty_name => self. [< $name _was_pressed >] (), )*
+                $(Button:: $ty_name => self. [< $name _just_pressed >] (), )*
                 Button::LeftTrigger => self.left_trigger_was_pressed(),
                 Button::RightTrigger => self.right_trigger_was_pressed(),
             }
@@ -406,7 +423,7 @@ macro_rules! gamepad_button {
         #[must_use]
         pub fn was_released(&self, button: Button) -> bool {
             match button {
-                $(Button:: $ty_name => self. [< $name _was_released >] (), )*
+                $(Button:: $ty_name => self. [< $name _just_released >] (), )*
                 Button::LeftTrigger => self.left_trigger_was_released(),
                 Button::RightTrigger => self.right_trigger_was_released(),
             }
@@ -561,7 +578,7 @@ impl Gamepad {
         /// The second finger on the touchpad.
         pub button touchpad_finger_2 TouchpadFinger2
 
-        /// No idea what this is.
+        /// The big brand button (i.e. playstation, xbox, etc.).
         pub button ps Ps
     );
 
@@ -632,22 +649,6 @@ impl Gamepad {
     ) {
         self.execute_on(Button::LeftTrigger, f, edge);
     }
-    ///Runs the provided function whenever `left_trigger` is pressed.
-    pub fn on_press_left_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-        self.execute_on_left_trigger_pressed(f, PressEdge::Press);
-    }
-    ///Runs the provided function whenever `left_trigger` is released.
-    pub fn on_release_left_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-        self.execute_on_left_trigger_pressed(f, PressEdge::Release);
-    }
-    ///Runs the provided function while `left_trigger` is pressed.
-    pub fn while_press_left_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-        self.execute_on_left_trigger_pressed(f, PressEdge::WhilePressed);
-    }
-    ///Runs the provided function while `left_trigger` is released.
-    pub fn while_release_left_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-        self.execute_on_left_trigger_pressed(f, PressEdge::WhileReleased);
-    }
     /// Boolean value of if the right trigger is past
     /// `DEFAULT_TRIGGER_THRESHOLD`.
     #[must_use]
@@ -716,22 +717,6 @@ impl Gamepad {
     ) {
         self.execute_on(Button::RightTrigger, f, edge);
     }
-    ///Runs the provided function whenever `right_trigger` is pressed.
-    pub fn on_press_right_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-        self.execute_on_right_trigger_pressed(f, PressEdge::Press);
-    }
-    ///Runs the provided function whenever `right_trigger` is released.
-    pub fn on_release_right_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-        self.execute_on_right_trigger_pressed(f, PressEdge::Release);
-    }
-    ///Runs the provided function while `right_trigger` is pressed.
-    pub fn while_press_right_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-        self.execute_on_right_trigger_pressed(f, PressEdge::WhilePressed);
-    }
-    ///Runs the provided function while `right_trigger` is released.
-    pub fn while_release_right_trigger(&self, f: impl FnMut(PressEdge) + 'static + Send + Sync) {
-        self.execute_on_right_trigger_pressed(f, PressEdge::WhileReleased);
-    }
 
     gamepad_button!(
         /// The X coordinate of the left stick.
@@ -770,6 +755,11 @@ pub enum OpModeType {
     Utility,
 }
 
+/// Make a type not be Sync. Set this as one of the fields and use `PhantomData` as the value.
+pub type PhantomUnsync = PhantomData<Cell<()>>;
+/// Make a type not be Send. Set this as one of the fields and use `PhantomData` as the value.
+pub type PhantomUnsend = PhantomData<MutexGuard<'static, ()>>;
+
 /// A context used for accessing the Java runtime. Note that cloning is somewhat
 /// costly from creating a new JNI global reference to the `this` object, so
 /// prefer passing around references rather than owned contexts.
@@ -784,6 +774,8 @@ pub struct FtcContext {
     name: &'static str,
     /// The location of the function that is this op mode.
     source: &'static Location<'static>,
+    /// FtcContext shouldn't be Sync as storing it in statics would be bad
+    no_sync: PhantomData<PhantomUnsync>,
 }
 
 /// Internal ID of an opmode. Used for storing user state internally.
@@ -802,6 +794,12 @@ impl OpModeId {
 }
 
 impl Debug for OpModeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+
+impl Display for OpModeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Some((name, source)) = SOURCE_INFO.lock().get(self).copied() else {
             return write!(
@@ -824,22 +822,50 @@ pub struct OpModeNameFormatter(pub &'static str, pub &'static Location<'static>)
 
 impl Debug for OpModeNameFormatter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "opmode @ {} {}", self.1, self.0)
+        write!(f, "{0} ({1})", self.0, self.1)
     }
 }
 
 /// Internal representation of a state.
 type DynState = Box<dyn Any + Send + Sync + 'static>;
 
-/// User state
+/// User state.
 static STATE: LazyLock<Mutex<HashMap<OpModeId, Vec<DynState>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Info about op mode names and source locations.
 static SOURCE_INFO: LazyLock<Mutex<HashMap<OpModeId, (&'static str, &'static Location<'static>)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static CURRENT_OPMODE_ID: Mutex<OpModeId> = Mutex::new(OpModeId(0));
+thread_local! {
+    /// Currently running op mode's ID. This is really cursed.
+    static CURRENT_OPMODE_ID: Mutex<OpModeId> =
+        const { Mutex::new(OpModeId(0)) };
+    /// Formatted text for the current unwind. This is even more cursed then [`CURRENT_OPMODE_ID`].
+    static CURRENT_PANIC_TEXT: Mutex<Option<PanicText>> =
+        const { Mutex::new(None) };
+}
 
-static CURRENT_PANIC_TEXT: Mutex<Option<String>> = Mutex::new(None);
+#[inline(always)]
+fn take_panic_text() -> PanicText {
+    CURRENT_PANIC_TEXT.with(|v| v.lock().take()).unwrap()
+}
+
+#[inline(always)]
+fn id() -> OpModeId {
+    CURRENT_OPMODE_ID.with(|v| *v.lock())
+}
+
+/// Text saved from a panic.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PanicText {
+    /// `message`, but with location. The text printed out after a panic in regular rust without
+    /// the backtrace.
+    pub with_location: String,
+    /// A backtrace of what led to the panic.
+    pub backtrace: String,
+    /// The message passed to [`panic!`].
+    pub message: String,
+}
 
 /// Counter used to assign IDs to opmodes. Starts at 1 as 0 is used to mark that an ID hasn't been
 /// assigned.
@@ -862,6 +888,7 @@ impl Clone for FtcContext {
             kind: self.kind,
             name: self.name,
             source: self.source,
+            no_sync: PhantomData,
         }
     }
 }
@@ -899,15 +926,17 @@ impl FtcContext {
             },
         ));
 
-        std::panic::set_hook(Box::new(|info| {
-            *CURRENT_PANIC_TEXT.lock() = Some(info.to_string());
-        }));
+        let out = Self::new_no_log(env, this, kind, name, source);
 
         info!("Rust FTC initalized");
 
-        Self::new_no_log(env, this, kind, name, source)
+        out
     }
-    /// Create a new context.
+    /// Create a new context. This is called in iterative op modes so that:
+    /// - The logcat logger is not initialized multiple times, and...
+    /// - The "Rust FTC initalized" text is not printed out constantly.
+    ///
+    /// This is called internally by [`FtcContext::new`].
     #[doc(hidden)]
     #[must_use]
     pub fn new_no_log<'local>(
@@ -917,12 +946,23 @@ impl FtcContext {
         name: &'static str,
         source: &'static Location<'static>,
     ) -> Self {
+        std::panic::set_hook(Box::new(|info| {
+            CURRENT_PANIC_TEXT.with(|v| {
+                *v.lock() = Some(PanicText {
+                    backtrace: std::backtrace::Backtrace::force_capture().to_string(),
+                    with_location: info.to_string(),
+                    message: info.payload_as_str().unwrap().to_string(),
+                })
+            });
+        }));
+
         let out = Self {
             this: env.new_global_ref(this).unwrap(),
             vm: env.get_java_vm().unwrap(),
             kind,
             name,
             source,
+            no_sync: PhantomData,
         };
         if out.id() == OpModeId(0) {
             out.vm
@@ -938,8 +978,9 @@ impl FtcContext {
                     jni::errors::Result::Ok(())
                 })
                 .unwrap();
+            let _ = out.id(); // call and ignore the result to properly set up SOURCE_INFO
         }
-        *CURRENT_OPMODE_ID.lock() = out.id();
+        out.init_thread();
         out
     }
     /// Get the name of the opmode currently running.
@@ -987,17 +1028,45 @@ impl FtcContext {
         if let Some(info) = SOURCE_INFO.lock().insert(id, (self.name, self.source))
             && info != (self.name, self.source)
         {
-            cold_path(); // I don't even KNOW how this would happen
+            // soomeone is screwing with the rust_id field from the java side
+            cold_path();
             warn!(
                 "multiple op modes with same ID! currently executing op mode is {:?}, other op \
-                 mode is {:?}! How did you do this??",
+                 mode is {:?}! please don't screw with the rust_id field, it's private for a \
+                 reason!",
                 OpModeNameFormatter(self.name, self.source),
                 OpModeNameFormatter(info.0, info.1)
-            )
+            );
         }
-        *CURRENT_OPMODE_ID.lock() = id;
 
         id
+    }
+    /// Call this right after spawning a thread to properly setup some debugging info. Otherwise,
+    /// panics in this thread will not list the running opmode.
+    pub fn init_thread(&self) {
+        let opmode = self.id();
+        if let Some(previous) = CURRENT_OPMODE_ID.with(|v| {
+            let mut lock = v.lock();
+            if lock.0 == 0 {
+                *lock = opmode;
+                None
+            } else {
+                Some(*lock)
+            }
+        }) && previous != opmode
+        {
+            cold_path();
+            warn!(
+                "thread initialized multiple times with different op modes, if intentional please \
+                 use setup_thread_silent"
+            )
+        }
+    }
+    /// Same as [`FtcContext::setup_thread`], but will not output a message if the thread is
+    /// initialized multiple times. Also marginally faster, but it's in almost all scenarios
+    /// insignificant.
+    pub fn init_thread_silent(&self) {
+        CURRENT_OPMODE_ID.with(|v| *v.lock() = self.id());
     }
     /// Whether the currently running opmode is iterative.
     #[must_use]

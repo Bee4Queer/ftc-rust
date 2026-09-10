@@ -1,8 +1,8 @@
 //! A command system, similar to `FTCLib`'s.
 
 use std::{
-    any::Any,
-    collections::VecDeque,
+    any::type_name,
+    collections::{HashMap, VecDeque},
     convert::Infallible,
     fmt::Debug,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -14,15 +14,16 @@ use std::{
 use log::error;
 use parking_lot::{Condvar, Mutex, RwLock, RwLockReadGuard};
 
-use crate::FtcContext;
+use crate::{FtcContext, PanicText, take_panic_text};
 
 /// The scheduler singleton.
 pub(crate) static SCHEDULER: LazyLock<RwLock<CommandScheduler>> = LazyLock::new(|| {
     RwLock::new(CommandScheduler {
-        to_add: Arc::new(Mutex::new(Vec::with_capacity(16))),
         empty: Arc::new(Condvar::new()),
         empty_mutex: Arc::new(Mutex::new(false)),
         queue_len: Arc::new(AtomicUsize::new(0)),
+        command_i: AtomicUsize::new(0),
+        commands: Arc::new(Mutex::new(HashMap::with_capacity(16))),
         runner_thread: None,
     })
 });
@@ -36,27 +37,36 @@ pub fn get_scheduler<'a>() -> RwLockReadGuard<'a, CommandScheduler> {
 }
 
 /// The current state of a command.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-enum CommandState {
-    /// Next step is initalizing.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CommandState {
+    /// The command has not been initialized yet.
     #[default]
     Initializing,
     /// Continualy execute.
     Executing,
-    /// Command has finished and on the next pass should be removed.
+    /// Command has finished.
     Finished,
+    /// Command panicked and will not be executed again.
+    Panicked(PanicText),
 }
+
+/// An ID identifying a [`StoredCommand`].
+type CommandId = usize;
+/// The data stored that represents a command.
+type StoredCommand = (Box<dyn Command>, CommandState);
 
 /// The command scheduler.
 pub struct CommandScheduler {
-    /// The commands that will begin executing in the next round.
-    to_add: Arc<Mutex<Vec<Box<dyn Command>>>>,
     /// Current length of the queue for the current round.
     queue_len: Arc<AtomicUsize>,
     /// Condvar for the queue being empty.
     empty: Arc<Condvar>,
     /// Mutex used with the empty condvar.
     empty_mutex: Arc<Mutex<bool>>,
+    /// Counter used to assign command IDs.
+    command_i: AtomicUsize,
+    /// Stored commands
+    commands: Arc<Mutex<HashMap<CommandId, StoredCommand>>>,
     /// The runner thread.
     runner_thread: Option<(JoinHandle<()>, Arc<Condvar>)>,
 }
@@ -76,8 +86,14 @@ impl CommandScheduler {
         self.queue_len.load(std::sync::atomic::Ordering::Acquire)
     }
     /// Execute this command.
-    pub fn execute(&self, command: impl Command) {
-        self.to_add.lock().push(Box::new(command));
+    pub fn execute(&self, command: impl Command) -> CommandHandle {
+        let id = self
+            .command_i
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.commands
+            .lock()
+            .insert(id, (Box::new(command), CommandState::Initializing));
+        CommandHandle { id }
     }
     /// Waits until the queue is clear.
     pub fn wait_until_queue_clear(&self) {
@@ -101,8 +117,7 @@ impl CommandScheduler {
     }
     /// Run this scheduler.
     pub(crate) fn run(&mut self, ctx: FtcContext) {
-        let commands = Mutex::new(Vec::new());
-        let to_add = self.to_add.clone();
+        let commands = self.commands.clone();
         let empty = self.empty.clone();
         let empty_mutex = self.empty_mutex.clone();
         let queue_len = self.queue_len.clone();
@@ -110,44 +125,31 @@ impl CommandScheduler {
         let (kill_runner, kill_mutex_runner) = (kill.clone(), Mutex::new(false));
 
         self.runner_thread = Some((
-            std::thread::spawn(move || {
-                loop {
-                    if !kill_runner
-                        .wait_for(&mut kill_mutex_runner.lock(), Duration::from_millis(20))
-                        .timed_out()
-                    {
-                        return;
-                    }
-
-                    let mut commands_locked = commands.lock();
-                    let to_add = to_add.lock().drain(..).collect::<Vec<_>>();
-                    for command in to_add {
-                        commands_locked.push((command, CommandState::Initializing));
-                    }
-                    queue_len.store(commands_locked.len(), std::sync::atomic::Ordering::Release);
-                    while !commands_locked.is_empty() {
+            std::thread::Builder::new()
+                .name("command scheduler".to_string())
+                .spawn(move || {
+                    ctx.init_thread_silent();
+                    loop {
                         if !kill_runner
-                            .wait_for(&mut kill_mutex_runner.lock(), Duration::from_millis(20))
+                            .wait_for(&mut kill_mutex_runner.lock(), Duration::from_millis(10))
                             .timed_out()
                         {
                             return;
                         }
+                        let mut commands_locked = commands.lock();
 
                         queue_len
                             .store(commands_locked.len(), std::sync::atomic::Ordering::Release);
-                        let to_remove =
-                            Arc::new(Mutex::new(Vec::with_capacity(commands_locked.len())));
+
                         std::thread::scope(|s| {
-                            for (i, (cmd, state)) in commands_locked.iter_mut().enumerate() {
+                            for (cmd, state) in commands_locked.values_mut() {
                                 let ctx = ctx.clone();
-                                let to_remove = to_remove.clone();
                                 s.spawn(move || {
+                                    ctx.init_thread();
                                     let res = catch_unwind(AssertUnwindSafe(|| {
-                                        match *state {
-                                            CommandState::Finished => {
-                                                cmd.end(&ctx);
-                                                to_remove.lock().push(i);
-                                            }
+                                        match state {
+                                            CommandState::Finished => {}
+                                            CommandState::Panicked(_) => {}
                                             CommandState::Initializing => {
                                                 cmd.init(&ctx);
                                                 *state = CommandState::Executing;
@@ -158,71 +160,91 @@ impl CommandScheduler {
                                                 }
                                             }
                                         }
-                                        if *state != CommandState::Finished && cmd.is_finished(&ctx)
+                                        if *state != CommandState::Finished
+                                            && !matches!(*state, CommandState::Panicked(_))
+                                            && cmd.is_finished(&ctx)
                                         {
                                             *state = CommandState::Finished;
+                                            cmd.end(&ctx);
                                         }
                                     }));
                                     match res {
                                         Ok(()) => {}
-                                        Err(payload) => {
-                                            let s = try_get_string_for_t::<&'static str>(&payload)
-                                                .or_else(|| {
-                                                    try_get_string_for_t::<String>(&payload)
-                                                })
-                                                .unwrap_or_else(|| {
-                                                    // Since it's possible that dropping a panic
-                                                    // payload may itself panic, we catch any panic
-                                                    // and fallback to forgetting/leaking the
-                                                    // payload.
-                                                    if let Err(drop_panic) =
-                                                        catch_unwind(AssertUnwindSafe(|| {
-                                                            drop(payload);
-                                                        }))
-                                                    {
-                                                        error!(
-                                                            "Panic while dropping panic payload: \
-                                                             {drop_panic:?}"
-                                                        );
-                                                        std::mem::forget(drop_panic);
-                                                    }
-                                                    "non-string panic payload".to_string()
-                                                });
-                                            error!("command panicked: {s}. Continuing.");
+                                        Err(_) => {
+                                            let s = take_panic_text();
+                                            *state = CommandState::Panicked(s.clone());
+                                            error!(
+                                                "command panicked in opmode {} (halting command): \
+                                                 {}\n{}",
+                                                ctx.id(),
+                                                s.with_location,
+                                                s.backtrace
+                                            );
                                         }
                                     }
                                 });
                             }
                         });
-                        let mut to_remove = to_remove.lock().clone();
-                        to_remove.sort_unstable();
 
-                        for (offset, ele) in to_remove.into_iter().enumerate() {
-                            commands_locked.remove(ele - offset);
-                        }
+                        *empty_mutex.lock() = true;
+                        empty.notify_all();
+                        *empty_mutex.lock() = false;
+                        std::thread::yield_now();
                     }
-                    *empty_mutex.lock() = true;
-                    empty.notify_all();
-                    *empty_mutex.lock() = false;
-                    std::thread::yield_now();
-                }
-            }),
+                })
+                .unwrap(),
             kill,
         ));
     }
 }
 
-/// Attempt to get a string for the provided panic payload
-fn try_get_string_for_t<T: ToString + 'static>(
-    payload: &(dyn Any + Send + 'static),
-) -> Option<String> {
-    payload.downcast_ref::<T>().map(ToString::to_string)
+/// A reference to a running command.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct CommandHandle {
+    /// The internal ID.
+    id: CommandId,
+}
+
+impl Debug for CommandHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(opaque Command handle)")
+    }
+}
+
+impl CommandHandle {
+    /// The current state of this command.
+    #[must_use]
+    pub fn state(&self) -> CommandState {
+        get_scheduler()
+            .commands
+            .lock()
+            .get(&self.id)
+            .unwrap()
+            .1
+            .clone()
+    }
+    /// Stop this command. This will not halt it if it is currently executing and locked up, but it
+    /// will not run it on the next scheduler cycle.
+    pub fn stop(&self) {
+        SCHEDULER
+            .write()
+            .commands
+            .lock()
+            .get_mut(&self.id)
+            .unwrap()
+            .1 = CommandState::Finished;
+    }
 }
 
 /// A command. Forms the foundation of the command system.
+#[allow(unused_variables)]
 pub trait Command: Send + Sync + 'static {
+    /// A debug-friendly name of this command.
+    fn name(&self) -> String {
+        type_name::<Self>().to_string()
+    }
     /// Initialize this command.
-    #[allow(unused_variables)]
     fn init(&mut self, ctx: &FtcContext) {}
     /// Execute this command. Called in a loop and should not block for too long
     /// for risk of holding up the command queue.
@@ -230,68 +252,76 @@ pub trait Command: Send + Sync + 'static {
     /// Whether to attempt to run this command. If not overridden, always
     /// returns true.
     ///
-    /// Only called during the execute phase.
-    #[allow(unused_variables)]
-    fn try_run(&mut self, ctx: &FtcContext) -> bool {
+    /// Only called during the execute phase, and called before actually running it.
+    fn try_run(&self, ctx: &FtcContext) -> bool {
         true
     }
     /// Return whether this command has finished or not. If not overridden,
-    /// always returns false.
-    #[allow(unused_variables)]
-    fn is_finished(&mut self, ctx: &FtcContext) -> bool {
+    /// always returns false (meaning it runs forever).
+    fn is_finished(&self, ctx: &FtcContext) -> bool {
         false
     }
     /// Ran after [`Command::is_finished`] returns true.
-    #[allow(unused_variables)]
     fn end(&mut self, ctx: &FtcContext) {}
     /// Schedule this command. For no-op commands like () or Infalliable, does
     /// nothing.
-    fn schedule(self)
+    fn schedule(self) -> CommandHandle
     where
         Self: Sized,
     {
-        SCHEDULER.write().execute(self);
+        SCHEDULER.write().execute(self)
     }
 }
 
 impl Command for () {
+    fn name(&self) -> String {
+        "unit command".to_string()
+    }
     fn execute(&mut self, _: &FtcContext) {}
-    fn is_finished(&mut self, _: &FtcContext) -> bool {
+    fn is_finished(&self, _: &FtcContext) -> bool {
         true
     }
-    fn try_run(&mut self, _: &FtcContext) -> bool {
+    fn try_run(&self, _: &FtcContext) -> bool {
         false
-    }
-    fn schedule(self)
-    where
-        Self: Sized,
-    {
-        // No point in scheduling a no-op command.
     }
 }
 
 impl Command for Infallible {
+    fn name(&self) -> String {
+        match *self {}
+    }
     fn init(&mut self, _: &FtcContext) {
         match *self {}
     }
     fn execute(&mut self, _: &FtcContext) {
         match *self {}
     }
-    fn is_finished(&mut self, _: &FtcContext) -> bool {
+    fn is_finished(&self, _: &FtcContext) -> bool {
         match *self {}
     }
-    fn try_run(&mut self, _: &FtcContext) -> bool {
+    fn try_run(&self, _: &FtcContext) -> bool {
         match *self {}
     }
-    fn schedule(self)
+    fn end(&mut self, _: &FtcContext) {
+        match *self {}
+    }
+    fn schedule(self) -> CommandHandle
     where
         Self: Sized,
     {
-        match self {}
+        match self {} // no point in attempting to schedule this, as this point is unreachable
     }
 }
 
 impl<T: Command> Command for VecDeque<T> {
+    fn name(&self) -> String {
+        format!(
+            "VecDeque<{}>",
+            self.front()
+                .map(Command::name)
+                .unwrap_or_else(|| "(empty)".to_string())
+        )
+    }
     fn init(&mut self, ctx: &FtcContext) {
         if let Some(cmd) = self.front_mut() {
             cmd.init(ctx);
@@ -309,19 +339,27 @@ impl<T: Command> Command for VecDeque<T> {
             }
         }
     }
-    fn try_run(&mut self, ctx: &FtcContext) -> bool {
-        if let Some(cmd) = self.front_mut() {
+    fn try_run(&self, ctx: &FtcContext) -> bool {
+        if let Some(cmd) = self.front() {
             cmd.try_run(ctx)
         } else {
             false
         }
     }
-    fn is_finished(&mut self, _: &FtcContext) -> bool {
+    fn is_finished(&self, _: &FtcContext) -> bool {
         self.is_empty()
     }
 }
 
 impl<T: Command> Command for Vec<T> {
+    fn name(&self) -> String {
+        format!(
+            "Vec<{}>",
+            self.first()
+                .map(Command::name)
+                .unwrap_or("(unknown type)".to_string())
+        )
+    }
     fn init(&mut self, ctx: &FtcContext) {
         if let Some(cmd) = self.first_mut() {
             cmd.init(ctx);
@@ -339,14 +377,14 @@ impl<T: Command> Command for Vec<T> {
             }
         }
     }
-    fn try_run(&mut self, ctx: &FtcContext) -> bool {
-        if let Some(cmd) = self.first_mut() {
+    fn try_run(&self, ctx: &FtcContext) -> bool {
+        if let Some(cmd) = self.first() {
             cmd.try_run(ctx)
         } else {
             false
         }
     }
-    fn is_finished(&mut self, _: &FtcContext) -> bool {
+    fn is_finished(&self, _: &FtcContext) -> bool {
         self.is_empty()
     }
 }

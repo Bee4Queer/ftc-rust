@@ -1,8 +1,9 @@
 //! JNI error policy that includes `PanicInfo` as a type here as well as `String`.
 
 use jni::{Env, errors::ErrorPolicy};
+use log::error;
 
-use crate::{CURRENT_OPMODE_ID, CURRENT_PANIC_TEXT};
+use crate::{id, take_panic_text};
 
 /// Version of the base JNI crate type that actually supports string types that
 /// aren't &'static str.
@@ -38,7 +39,16 @@ impl<T: Default, E: std::error::Error> ErrorPolicy<T, E> for ThrowRuntimeExAndDe
         // but in this case (where we are going to be letting the exception
         // propagate to Java), we want to ensure we don't return that as an
         // error
-        let _ = env.throw(format!("panic @ {:?}: {}", *CURRENT_OPMODE_ID.lock(), CURRENT_PANIC_TEXT.lock().take().unwrap()));
+        let text = take_panic_text();
+        let id = id();
+        error!(
+            "panic in {}: {}\n{}",
+            id, text.with_location, text.backtrace,
+        );
+        let _ = env.throw(format!(
+            "rust panic in {id}: {} (see logcat for more info)",
+            text.message
+        ));
         Ok(T::default())
     }
 }
