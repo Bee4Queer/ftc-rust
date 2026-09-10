@@ -255,19 +255,23 @@ impl Display for WhichGamepad {
     }
 }
 
-#[allow(missing_docs)]
+/// The edge to call a button callback on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PressEdge {
+    /// Will only be called once right after it is pressed.
     Press,
+    /// Will only be called once right after it is released.
     Release,
+    /// Will be called continously while pressed.
     WhilePressed,
+    /// Will be called continously while released.
     WhileReleased,
 }
 
 /// The command used for button presses. Registered by the `Gamepad::on_*` and
 /// `Gamepad::while_` functions.
 #[derive(Debug)]
-pub struct ButtonCommand<F: FnMut(PressEdge) + 'static + Send + Sync> {
+pub struct ButtonCommand<F: FnMut(&FtcContext, PressEdge) + 'static + Send + Sync> {
     /// The gamepad to check.
     pub gamepad: WhichGamepad,
     /// The button to check.
@@ -279,15 +283,15 @@ pub struct ButtonCommand<F: FnMut(PressEdge) + 'static + Send + Sync> {
     pub f: F,
 }
 
-impl<F: FnMut(PressEdge) + 'static + Send + Sync> Command for ButtonCommand<F> {
+impl<F: FnMut(&FtcContext, PressEdge) + 'static + Send + Sync> Command for ButtonCommand<F> {
     fn name(&self) -> String {
         format!(
             "ButtonCommand<{}, {:?}, {:?}>",
             self.gamepad, self.button, self.edge,
         )
     }
-    fn execute(&mut self, _: &FtcContext) {
-        (self.f)(self.edge);
+    fn execute(&mut self, ctx: &FtcContext) {
+        (self.f)(ctx, self.edge);
     }
     fn try_run(&self, ctx: &FtcContext) -> bool {
         let gamepad = match self.gamepad {
@@ -306,7 +310,7 @@ impl<F: FnMut(PressEdge) + 'static + Send + Sync> Command for ButtonCommand<F> {
 
 /// The command used for stick thresholds.
 #[derive(Debug)]
-pub struct StickCommand<F: FnMut(f32) + 'static + Send + Sync> {
+pub struct StickCommand<F: FnMut(&FtcContext, f32) + 'static + Send + Sync> {
     /// The gamepad to check.
     pub gamepad: WhichGamepad,
     /// The stick to check.
@@ -320,7 +324,7 @@ pub struct StickCommand<F: FnMut(f32) + 'static + Send + Sync> {
     pub f: F,
 }
 
-impl<F: FnMut(f32) + 'static + Send + Sync> Command for StickCommand<F> {
+impl<F: FnMut(&FtcContext, f32) + 'static + Send + Sync> Command for StickCommand<F> {
     fn name(&self) -> String {
         format!(
             "StickCommand<{}, {:?}, {}{}>",
@@ -338,7 +342,7 @@ impl<F: FnMut(f32) + 'static + Send + Sync> Command for StickCommand<F> {
 
         let value = gamepad.get_stick(self.stick);
 
-        (self.f)(value);
+        (self.f)(ctx, value);
     }
     fn try_run(&self, ctx: &FtcContext) -> bool {
         let gamepad = match self.gamepad {
@@ -394,9 +398,9 @@ macro_rules! gamepad_button {
         }
 
         /// Execute the provided function when the provided edge occurs.
-        $vis fn [< execute_on_ $name >] (
+        $vis fn [< on_ $name >] (
             &self,
-            f: impl FnMut(PressEdge) + 'static + Send + Sync,
+            f: impl FnMut(&FtcContext, PressEdge) + 'static + Send + Sync,
             edge: PressEdge
         ) {
             self.execute_on(Button:: $ty_name, f, edge);
@@ -450,7 +454,7 @@ macro_rules! gamepad_button {
             /// Call the provided function when the threshold is passed. Called repeatedly. If
             /// `dir` is true, then the direction matters.
             $vis fn [< on_ $name >] (&self,
-                f: impl FnMut(f32) + 'static + Send + Sync,
+                f: impl FnMut(&FtcContext, f32) + 'static + Send + Sync,
                 threshold: f32,
                 dir: bool
             ) {
@@ -493,7 +497,7 @@ impl Gamepad {
     pub fn execute_on(
         &self,
         button: Button,
-        f: impl FnMut(PressEdge) + 'static + Send + Sync,
+        f: impl FnMut(&FtcContext, PressEdge) + 'static + Send + Sync,
         edge: PressEdge,
     ) {
         (ButtonCommand {
@@ -511,7 +515,7 @@ impl Gamepad {
         stick: Stick,
         threshold: f32,
         dir: bool,
-        f: impl FnMut(f32) + 'static + Send + Sync,
+        f: impl FnMut(&FtcContext, f32) + 'static + Send + Sync,
     ) {
         (StickCommand {
             gamepad: self.which,
@@ -642,9 +646,9 @@ impl Gamepad {
         }
     }
     /// Execute the provided function when the provided edge occurs.
-    pub fn execute_on_left_trigger_pressed(
+    pub fn on_left_trigger_pressed(
         &self,
-        f: impl FnMut(PressEdge) + 'static + Send + Sync,
+        f: impl FnMut(&FtcContext, PressEdge) + 'static + Send + Sync,
         edge: PressEdge,
     ) {
         self.execute_on(Button::LeftTrigger, f, edge);
@@ -710,9 +714,9 @@ impl Gamepad {
         }
     }
     /// Execute the provided function when the provided edge occurs.
-    pub fn execute_on_right_trigger_pressed(
+    pub fn on_right_trigger_pressed(
         &self,
-        f: impl FnMut(PressEdge) + 'static + Send + Sync,
+        f: impl FnMut(&FtcContext, PressEdge) + 'static + Send + Sync,
         edge: PressEdge,
     ) {
         self.execute_on(Button::RightTrigger, f, edge);
@@ -1279,7 +1283,7 @@ struct InnerIterativeContext {
     init_loop: IterativeCallbacks,
     /// `start` callbacks
     start: IterativeCallbacks,
-    /// `r#loop` callbacks
+    /// `loop` callbacks
     r#loop: IterativeCallbacks,
     /// `stop` callbacks
     stop: IterativeCallbacks,
@@ -1289,13 +1293,17 @@ struct InnerIterativeContext {
 
 /// A callback for an iterative opmode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[allow(missing_docs)]
 pub enum IterativeCallback {
+    /// Called once when the driver presses init.
     #[default]
     Init,
+    /// Called continously before the driver presses start.
     InitLoop,
+    /// Called once when the driver presses start.
     Start,
+    /// Called continously while the op mode is running.
     Loop,
+    /// Called once when the driver presses stop.
     Stop,
 }
 
