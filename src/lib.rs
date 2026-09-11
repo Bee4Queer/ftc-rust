@@ -1307,18 +1307,25 @@ pub enum IterativeCallback {
     Stop,
 }
 
+/// Restrict the types that can be used in the type parameter of [`IterativeContext`].
+trait IterativePhantomSealed {}
+
+impl IterativePhantomSealed for *const () {}
+impl IterativePhantomSealed for () {}
+
 /// Type used to register callbacks for an iterative op mode.
 #[derive(Clone)]
-pub struct IterativeContext<Phantom = *const ()>
+#[allow(private_bounds)]
+pub struct IterativeContext<Static = *const ()>
 where
-    Phantom: ?Sized,
+    Static: IterativePhantomSealed,
 {
     /// The reference-counted actual data.
     inner: Arc<Mutex<InnerIterativeContext>>,
     /// Make it difficult for someone to store this in a static or similar as
     /// that is something that you really should not do. Wish Rust allowed
     /// this to have a custom message.
-    _phantom: PhantomData<Phantom>,
+    _phantom: PhantomData<Static>,
 }
 
 /// An iterative context that is Send + Sync. Usually not what you want; see
@@ -1439,7 +1446,7 @@ impl IterativeContext<*const ()> {
         /// it is called in a loop by the runtime itself.
         r#loop: Running,
         /// This should have minimal code needed for basic cleanup as it will be
-        /// terminated by the runtime if it takes too long.
+        /// terminated by the runtime if it takes too long (>900ms, ish).
         stop: Stop,
     );
 }

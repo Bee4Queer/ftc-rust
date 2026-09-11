@@ -126,7 +126,7 @@ impl CommandScheduler {
 
         self.runner_thread = Some((
             std::thread::Builder::new()
-                .name("command scheduler".to_string())
+                .name("OpModeCommandScheduler".to_string())
                 .spawn(move || {
                     ctx.init_thread_silent();
                     loop {
