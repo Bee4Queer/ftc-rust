@@ -18,6 +18,7 @@ use jni::{
 #[macro_use]
 mod devices;
 pub use devices::*;
+pub mod ext;
 pub mod limelight;
 pub mod sensors;
 use log::{error, trace};
@@ -969,7 +970,7 @@ impl Rev9AxisImuOrientationOnRobot {
     /// Validate this orientation.
     #[must_use]
     pub fn validate(&self) -> bool {
-        // code adapted from
+        // code adapted from javaland
         match self.logo_dir {
             Orientation::Up | Orientation::Down => match self.i2c_dir {
                 Orientation::Up | Orientation::Down => false,
@@ -1121,7 +1122,7 @@ enum_variant_into! {
 /// Internal details: This struct is quite small, being represented as two pointers and thus only
 /// taking up either 8 or 16 bytes of memory. However, cloning it is actually reasonably expensive,
 /// as it has to create a new global reference on each clone, so cloning should be avoided where
-/// possible. All methods should take an immutable reference and this is [`Sync`], so this should be
+/// possible. All methods take an immutable reference and it is [`Sync`], so this should be
 /// reasonably easy.
 pub struct HardwareDevice {
     /// The environment.

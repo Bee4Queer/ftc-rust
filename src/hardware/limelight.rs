@@ -74,7 +74,7 @@ impl Drop for Limelight3AConfig<'_> {
 }
 
 impl Limelight3A {
-    /// Configure
+    /// Configure the Limelight.
     pub fn config<R>(&self, f: impl FnOnce(&Limelight3AConfig) -> R) -> R {
         self.stop();
         let cfg = Limelight3AConfig { limelight: self };

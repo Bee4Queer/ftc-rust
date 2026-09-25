@@ -778,12 +778,11 @@ pub struct FtcContext {
     name: &'static str,
     /// The location of the function that is this op mode.
     source: &'static Location<'static>,
-    /// FtcContext shouldn't be Sync as storing it in statics would be bad
-    no_sync: PhantomData<PhantomUnsync>,
 }
 
 /// Internal ID of an opmode. Used for storing user state internally.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
 pub struct OpModeId(i64);
 
 impl OpModeId {
@@ -892,7 +891,6 @@ impl Clone for FtcContext {
             kind: self.kind,
             name: self.name,
             source: self.source,
-            no_sync: PhantomData,
         }
     }
 }
@@ -966,7 +964,6 @@ impl FtcContext {
             kind,
             name,
             source,
-            no_sync: PhantomData,
         };
         if out.id() == OpModeId(0) {
             out.vm
