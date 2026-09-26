@@ -310,21 +310,21 @@ impl<F: FnMut(&FtcContext, PressEdge) + 'static + Send + Sync> Command for Butto
 
 /// The command used for stick thresholds.
 #[derive(Debug)]
-pub struct StickCommand<F: FnMut(&FtcContext, f32) + 'static + Send + Sync> {
+pub struct StickCommand<F: FnMut(&FtcContext, f64) + 'static + Send + Sync> {
     /// The gamepad to check.
     pub gamepad: WhichGamepad,
     /// The stick to check.
     pub stick: Stick,
     /// The threshold it must meet to activate. If negative, it must be less
     /// than this, if positive it must be greater.
-    pub threshold: f32,
+    pub threshold: f64,
     /// If false, the absolute value is taken of the stick first.
     pub abs: bool,
     /// The function to call when the condition is met.
     pub f: F,
 }
 
-impl<F: FnMut(&FtcContext, f32) + 'static + Send + Sync> Command for StickCommand<F> {
+impl<F: FnMut(&FtcContext, f64) + 'static + Send + Sync> Command for StickCommand<F> {
     fn name(&self) -> String {
         format!(
             "StickCommand<{}, {:?}, {}{}>",
@@ -436,8 +436,8 @@ macro_rules! gamepad_button {
     ($($(#[$attr:meta])* $vis:vis float $name:ident $ty_name:ident)*) => {
         pastey::paste! {
             $($(#[$attr])*
-            $vis fn $name (&self) -> f32 {
-                self
+            $vis fn $name (&self) -> f64 {
+                f64::from(self
                     .vm
                     .attach_current_thread(|env| {
                         env.get_field(
@@ -448,20 +448,20 @@ macro_rules! gamepad_button {
                         ?
                         .f()
                     })
-                    .unwrap()
+                    .unwrap())
             }
 
             /// Call the provided function when the threshold is passed. Called repeatedly. If
             /// `dir` is true, then the direction matters.
             $vis fn [< on_ $name >] (&self,
-                f: impl FnMut(&FtcContext, f32) + 'static + Send + Sync,
-                threshold: f32,
+                f: impl FnMut(&FtcContext, f64) + 'static + Send + Sync,
+                threshold: f64,
                 dir: bool
             ) {
                 self.execute_on_stick(Stick:: $ty_name, threshold, dir, f);
             } )*
             /// Get the value of the provided stick.
-            pub fn get_stick(&self, stick: Stick) -> f32 {
+            pub fn get_stick(&self, stick: Stick) -> f64 {
                 match stick {
                     $(Stick:: $ty_name => self. $name ()),*
                 }
@@ -513,9 +513,9 @@ impl Gamepad {
     pub fn execute_on_stick(
         &self,
         stick: Stick,
-        threshold: f32,
+        threshold: f64,
         dir: bool,
-        f: impl FnMut(&FtcContext, f32) + 'static + Send + Sync,
+        f: impl FnMut(&FtcContext, f64) + 'static + Send + Sync,
     ) {
         (StickCommand {
             gamepad: self.which,
