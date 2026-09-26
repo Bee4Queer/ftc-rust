@@ -88,10 +88,10 @@ macro_rules! device {
             }
         }
         impl $crate::hardware::ExtendableDevice for $name {
-            fn vm(&self) -> &jni::JavaVM {
+            fn vm(&self) -> &$crate::jni::JavaVM {
                 &self.vm
             }
-            fn object(&self) -> &jni::objects::Global<jni::objects::JObject<'static>> {
+            fn object(&self) -> &$crate::jni::objects::Global<$crate::jni::objects::JObject<'static>> {
                 &self.object
             }
         }
@@ -124,7 +124,7 @@ macro_rules! device {
         }
 
         impl ::std::fmt::Debug for $name {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 if self.is_null() {
                     return f.write_str(concat!("(null ", stringify!($name), " reference)"));
                 }
@@ -144,10 +144,10 @@ macro_rules! device {
             }
         }
         impl $crate::hardware::ExtendableDevice for $name {
-            fn vm(&self) -> &jni::JavaVM {
+            fn vm(&self) -> &$crate::jni::JavaVM {
                 &self.vm
             }
-            fn object(&self) -> &jni::objects::Global<jni::objects::JObject<'static>> {
+            fn object(&self) -> &$crate::jni::objects::Global<$crate::jni::objects::JObject<'static>> {
                 &self.object
             }
         }
