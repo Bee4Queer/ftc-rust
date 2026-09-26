@@ -276,7 +276,7 @@ impl Iterator for Hardware {
 }
 
 /// Get a `JClass` of the provided type.
-fn get_class<'local>(env: &mut Env<'local>, jni_class: impl AsRef<str>) -> JClass<'local> {
+pub fn get_class<'local>(env: &mut Env<'local>, jni_class: impl AsRef<str>) -> JClass<'local> {
     env.load_class(JNIString::new(jni_class)).unwrap()
 }
 
@@ -298,15 +298,15 @@ macro_rules! enum_variant_into {
             /// Java class
             $vis const [< $($prefix)? JAVA_CLASS >]: &'static str = $java_class;
             /// conversion
-            $vis fn [< into_jni_object $($suffix)? >]<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
-                let class = get_class(env, Self:: [< $($prefix)? JNI_CLASS >]);
+            $vis fn [< into_jni_object $($suffix)? >]<'local>(self, env: &mut $crate::jni::Env<'local>) -> $crate::jni::objects::JObject<'local> {
+                let class = $crate::hardware::get_class(env, Self:: [< $($prefix)? JNI_CLASS >]);
                 env
                     .get_static_field(
                         class,
-                        JNIString::new(match self {
+                        $crate::jni::strings::JNIString::new(match self {
                             $(Self:: $variant => stringify!($variant).to_uppercase()),*
                         }),
-                        RuntimeFieldSignature::from_str(concat!("L", $jni_class, ";")).unwrap().field_signature(),
+                        $crate::jni::signature::RuntimeFieldSignature::from_str(concat!("L", $jni_class, ";")).unwrap().field_signature(),
                     )
                     .unwrap()
                     .l()
@@ -315,8 +315,8 @@ macro_rules! enum_variant_into {
 
             /// conversion
             $vis fn [< from_jni_object $($suffix)? >](
-                vm: &JavaVM,
-                obj: Global<JObject<'static>>,
+                vm: &$crate::jni::JavaVM,
+                obj: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>,
             ) -> Self {
                 let res = vm.attach_current_thread(|env| call_method!(env env, obj, "ordinal", "()I", []).unwrap().i()).unwrap();
                 let items = vec![$(Self:: $variant),*];
@@ -331,7 +331,7 @@ macro_rules! enum_variant_into {
         $($variant:ident),*
         $(,)?
     } => {
-        impl IntoJniObject for $ty {
+        impl $crate::hardware::IntoJniObject for $ty {
             enum_variant_into!(body, $jni_class, $java_class, $($variant),*);
         }
     };
