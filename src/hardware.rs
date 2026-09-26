@@ -292,7 +292,7 @@ macro_rules! enum_variant_into {
         $(,)?
         $(;)?
     } => {
-        pastey::paste!{
+        $crate::pastey::paste!{
             /// JNI class
             $vis const [< $($prefix)? JNI_CLASS >]: &'static str = $jni_class;
             /// Java class

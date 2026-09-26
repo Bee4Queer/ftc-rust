@@ -33,6 +33,9 @@ use crate::{
     hardware::{Hardware, IntoJniObject},
 };
 
+#[doc(hidden)]
+pub use pastey;
+
 /// Commonly used items.
 pub mod prelude {
     pub use log::{debug, error, info, trace, warn};
