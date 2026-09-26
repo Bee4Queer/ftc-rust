@@ -281,6 +281,7 @@ fn get_class<'local>(env: &mut Env<'local>, jni_class: impl AsRef<str>) -> JClas
 }
 
 /// Generate an implementation of `IntoJniObject` for an enum.
+#[macro_export]
 macro_rules! enum_variant_into {
     {
         $vis:vis body, $jni_class:literal,
