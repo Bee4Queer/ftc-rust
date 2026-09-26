@@ -122,7 +122,7 @@ impl DcMotor {
     /// similar to the operation of a servo. The maximum speed at which this
     /// advance or retreat occurs is governed by the power level
     /// currently set on the motor. While the motor is advancing or retreating
-    /// to the desired target position, [`DcMotor::is_busy`] will return
+    /// to the desired target position, [`DcMotor::busy`] will return
     /// true.
     ///
     /// Note that adjustment to a target position is only effective when the

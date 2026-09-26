@@ -1063,7 +1063,7 @@ impl FtcContext {
             )
         }
     }
-    /// Same as [`FtcContext::setup_thread`], but will not output a message if the thread is
+    /// Same as [`FtcContext::init_thread`], but will not output a message if the thread is
     /// initialized multiple times. Also marginally faster, but it's in almost all scenarios
     /// insignificant.
     pub fn init_thread_silent(&self) {
@@ -1437,7 +1437,7 @@ impl IterativeContext<*const ()> {
         /// This callback should not have any internal loops/unbounded recursion as
         /// it is called in a loop by the runtime itself.
         init_loop: Init,
-        /// Prefer putting the body of a loop in [`loop`](IterativeContext::r#loop).
+        /// Prefer putting the body of a loop in [`loop`](IterativeContext::loop).
         start: Running,
         /// This callback should not have any internal loops/unbounded recursion as
         /// it is called in a loop by the runtime itself.
