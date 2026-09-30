@@ -3,5 +3,6 @@
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",
         "ftc-rust-proc/Cargo.toml"
-    ]
+    ],
+    "rust-analyzer.cargo.features": "all",
 }

@@ -220,8 +220,9 @@ macro_rules! index_jlist {
 macro_rules! jlist {
     [float $env:expr; $($args:expr),* $(,)?] => {
         {
+            use $crate::jni::refs::Reference;
             let env: &mut $crate::jni::Env = $env;
-            let class = env.find_class(JList::class_name()).unwrap();
+            let class = env.find_class($crate::jni::objects::JList::class_name()).unwrap();
             let obj = env.new_object(class, $crate::jni::jni_sig!("()Ljava/util/List;"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
             let class = env.find_class($crate::jni::jni_str!("java/lang/Float")).unwrap();
@@ -234,8 +235,9 @@ macro_rules! jlist {
     };
     [env $env:expr; $($args:expr),* $(,)?] => {
         {
+            use $crate::jni::refs::Reference;
             let env: &mut $crate::jni::Env = $env;
-            let class = env.find_class(JList::class_name()).unwrap();
+            let class = env.find_class($crate::jni::objects::JList::class_name()).unwrap();
             let obj = env.new_object(class, jni_sig!("()Ljava/util/List;"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
             $(
@@ -246,8 +248,9 @@ macro_rules! jlist {
     };
     [env $env:expr; from $val:expr] => {
         {
+            use $crate::jni::refs::Reference;
             let env: &mut $crate::jni::Env = $env;
-            let class = env.find_class(JList::class_name()).unwrap();
+            let class = env.find_class($crate::jni::objects::JList::class_name()).unwrap();
             let obj = env.new_object(class, jni_sig!("()Ljava/util/List;"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
             for val in $val {

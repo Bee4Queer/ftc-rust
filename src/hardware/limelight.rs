@@ -6,7 +6,6 @@ use glam::{Mat4, Quat, vec4};
 use jni::{
     JValue, jni_sig,
     objects::{JList, JObject, JString},
-    refs::Reference,
     strings::JNIString,
 };
 

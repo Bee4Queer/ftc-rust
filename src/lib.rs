@@ -29,8 +29,7 @@ use log::{info, trace, warn};
 use parking_lot::{Mutex, MutexGuard};
 
 use crate::{
-    command::{Command, SCHEDULER},
-    hardware::{Hardware, IntoJniObject},
+    command::{Command, SCHEDULER}, hardware::{Hardware, IntoJniObject}, pedro::Pedro,
 };
 
 #[doc(hidden)]
@@ -48,6 +47,8 @@ pub mod prelude {
 
 pub mod command;
 pub mod hardware;
+#[cfg(feature = "pedro-pathing")]
+pub mod pedro;
 
 #[macro_use]
 mod macros;
@@ -1072,6 +1073,20 @@ impl FtcContext {
     pub fn init_thread_silent(&self) {
         CURRENT_OPMODE_ID.with(|v| *v.lock() = self.id());
     }
+
+    /// Pedro
+    #[cfg(feature = "pedro-pathing")]
+    pub fn pedro(&self, start_pose: pedro::Pose) -> Pedro {
+        self.pedro_with_constants("org/firstinspires/teamcode/pedro/Constants", start_pose)
+    }
+    /// The constants class name should be specified in JNI form, meaning the default is `org/firstinspires/teamcode/pedro/Constants`.
+    /// 
+    /// If you have the class nested in another class, replace the . in the Java name with $. All other .s should become /s.
+    #[cfg(feature = "pedro-pathing")]
+    pub fn pedro_with_constants(&self, constants_class: impl AsRef<str>, start_pose: pedro::Pose) -> Pedro {
+        Pedro::new(self, constants_class, start_pose)
+    }
+    
     /// Whether the currently running opmode is iterative.
     #[must_use]
     pub fn is_iterative(&self) -> bool {
