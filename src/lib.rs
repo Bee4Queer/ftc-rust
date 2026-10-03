@@ -33,7 +33,7 @@ pub use pastey;
 pub use glam;
 
 use crate::{
-    command::{Command, IntoCommand, SCHEDULER}, hardware::{Hardware, IntoJniObject},
+    command::{Command, SCHEDULER}, hardware::{Hardware, IntoJniObject},
 };
 
 /// Commonly used items.
@@ -1387,7 +1387,7 @@ macro_rules! iterative_stages {
                 $(#[$meta])*
                 pub fn [<# $stage>]<
                     T: Any + Default + Send + Sync + 'static,
-                    C: IntoCommand
+                    C: Command
                 >(
                     &self,
                     f: impl FnMut(&FtcContext, &mut T) -> C + Send + 'static
@@ -1450,7 +1450,7 @@ impl IterativeContext<*const ()> {
     }
     /// Register a new callback. Does NOT overwrite any previous callbacks
     /// and just adds another.
-    pub fn register<T: Any + Default + Send + Sync + 'static, C: IntoCommand>(
+    pub fn register<T: Any + Default + Send + Sync + 'static, C: Command>(
         &self,
         at: IterativeCallback,
         mut f: impl FnMut(&FtcContext, &mut T) -> C + Send + 'static,
