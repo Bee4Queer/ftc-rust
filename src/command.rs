@@ -44,8 +44,8 @@ pub fn get_scheduler<'a>() -> RwLockReadGuard<'a, CommandScheduler> {
 pub enum CommandState {
     /// The command has not been initialized yet.
     #[default]
-    Initializing,
-    /// Continualy execute.
+    Uninitialized,
+    /// Continually executing in a loop.
     Executing,
     /// Command has finished.
     Finished,
@@ -71,6 +71,8 @@ impl CommandState {
 /// An ID identifying a [`StoredCommand`].
 type CommandId = u64;
 
+type Thenable = dyn FnOnce(&FtcContext) + Send + Sync + 'static;
+
 /// The data stored that represents a command.
 struct StoredCommand {
     /// The actual command.
@@ -79,6 +81,8 @@ struct StoredCommand {
     state: CommandState,
     /// Commands to schedule after the command finishes.
     schedule_after: Vec<Box<dyn Command>>,
+    /// Stuff to call after the command finishes.
+    thenables: Vec<Box<Thenable>>,
 }
 
 /// The command scheduler.
@@ -120,8 +124,9 @@ impl CommandScheduler {
             id,
             StoredCommand {
                 cmd: Box::new(command),
-                state: CommandState::Initializing,
+                state: CommandState::Uninitialized,
                 schedule_after: Vec::new(),
+                thenables: Vec::new(),
             },
         );
         CommandHandle { id }
@@ -177,6 +182,7 @@ impl CommandScheduler {
                                 cmd,
                                 state,
                                 schedule_after,
+                                thenables,
                             } in commands_locked.values_mut()
                             {
                                 let ctx = ctx.clone();
@@ -186,7 +192,7 @@ impl CommandScheduler {
                                         match state {
                                             CommandState::Finished => {}
                                             CommandState::Panicked(_) => {}
-                                            CommandState::Initializing => {
+                                            CommandState::Uninitialized => {
                                                 cmd.init(&ctx);
                                                 *state = CommandState::Executing;
                                             }
@@ -205,6 +211,9 @@ impl CommandScheduler {
                                     if state.ended() {
                                         for command in schedule_after.drain(..) {
                                             command.schedule();
+                                        }
+                                        for thenable in thenables.drain(..) {
+                                            thenable(&ctx)
                                         }
                                     }
                                     match res {
@@ -266,6 +275,9 @@ impl CommandHandle {
     /// Stop this command. This will not halt it if it is currently executing and locked up, but it
     /// will not run it on the next scheduler cycle.
     pub fn stop(&self) {
+        if self.state().ended() {
+            return; // don't erase the panic message if there is one
+        }
         SCHEDULER
             .write()
             .commands
@@ -284,6 +296,17 @@ impl CommandHandle {
             .unwrap()
             .schedule_after
             .push(Box::new(cmd));
+    }
+    /// Call the provided function after the command finishes.
+    pub fn then(&self, f: impl FnOnce(&FtcContext) + Send + Sync + 'static) {
+        SCHEDULER
+            .write()
+            .commands
+            .lock()
+            .get_mut(&self.id)
+            .unwrap()
+            .thenables
+            .push(Box::new(f));
     }
 }
 
