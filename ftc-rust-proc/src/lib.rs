@@ -385,22 +385,6 @@ pub fn ftc(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
 
-    if func.sig.asyncness.is_none() && linear {
-        return quote_spanned! {func.sig.ident.span()=>
-            compile_error!("linear op mode must be async");
-            #func
-        }
-        .into();
-    }
-
-    if func.sig.asyncness.is_some() && iterative {
-        return quote_spanned! {func.sig.ident.span()=>
-            compile_error!("iterative op mode cannot be async");
-            #func
-        }
-        .into();
-    }
-
     let java_bindings_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
         .parent()
         .unwrap()
