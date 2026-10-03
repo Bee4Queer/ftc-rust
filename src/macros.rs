@@ -241,8 +241,21 @@ macro_rules! jlist {
             let obj = env.new_object(class, jni_sig!("()Ljava/util/List;"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
             $(
-                out.add(env, $args.into()).unwrap();
+                out.add(env, (&$args).into()).unwrap();
             )*
+            out
+        }
+    };
+    [env $env:expr; from objs $val:expr] => {
+        {
+            use $crate::jni::refs::Reference;
+            let env: &mut $crate::jni::Env = $env;
+            let class = env.find_class($crate::jni::objects::JList::class_name()).unwrap();
+            let obj = env.new_object(class, jni_sig!("()Ljava/util/List;"), &[]).unwrap();
+            let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
+            for val in $val {
+                out.add(env, &val).unwrap();
+            }
             out
         }
     };
@@ -258,6 +271,67 @@ macro_rules! jlist {
                 out.add(env, &val).unwrap();
             }
             out
+        }
+    };
+}
+
+/// Generate an implementation of `IntoJniObject` for an enum.
+#[macro_export]
+macro_rules! enum_variant_into {
+    {
+        $vis:vis body, $jni_class:literal,
+        $java_class:literal,
+        $($variant:ident),*
+        $(; PREFIX = $prefix:ident)?
+        $(; suffix = $suffix:ident)?
+        $(,)?
+        $(;)?
+    } => {
+        $crate::pastey::paste!{
+            /// JNI class
+            $vis const [< $($prefix)? JNI_CLASS >]: &'static str = $jni_class;
+            /// Java class
+            $vis const [< $($prefix)? JAVA_CLASS >]: &'static str = $java_class;
+            /// conversion
+            $vis fn [< into_jni_object $($suffix)? >]<'local>(self, env: &mut $crate::jni::Env<'local>) -> $crate::jni::objects::JObject<'local> {
+                let class = $crate::hardware::get_class(env, Self:: [< $($prefix)? JNI_CLASS >]);
+                env
+                    .get_static_field(
+                        class,
+                        $crate::jni::strings::JNIString::new(match self {
+                            $(Self:: $variant => stringify!($variant).to_uppercase()),*
+                        }),
+                        $crate::jni::signature::RuntimeFieldSignature::from_str(concat!("L", $jni_class, ";")).unwrap().field_signature(),
+                    )
+                    .unwrap()
+                    .l()
+                    .unwrap()
+            }
+
+            /// conversion
+            $vis fn [< from_jni_object $($suffix)? >](
+                vm: &$crate::jni::JavaVM,
+                obj: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>,
+            ) -> Self {
+                let res = vm.attach_current_thread(|env| $crate::call_method!(env env, obj, "ordinal", "()I", []).unwrap().i()).unwrap();
+                let items = vec![$(Self:: $variant),*];
+                items[res as usize]
+            }
+        }
+    };
+    {
+        $ty:ty,
+        $jni_class:literal,
+        $java_class:literal,
+        $($variant:ident),*
+        $(,)?
+    } => {
+        const _: () = {
+            const fn assert_copy<T: Copy>() {}
+            assert_copy::<$ty>();
+        };
+        impl $crate::hardware::IntoJniObject for $ty {
+            enum_variant_into!(body, $jni_class, $java_class, $($variant),*);
         }
     };
 }

@@ -6,7 +6,7 @@ use std::{
     fmt::{Debug, Display},
 };
 
-use glam::{Quat, Vec3, vec4};
+use glam::{DVec3, Quat, vec4};
 use jni::{
     Env, JavaVM, jni_sig, jni_str,
     objects::{JClass, JObject, JString},
@@ -23,7 +23,7 @@ pub mod limelight;
 pub mod sensors;
 use log::{error, trace};
 
-use crate::{call_method, get_field, new_global, new_string};
+use crate::{call_method, enum_variant_into, get_field, new_global, new_string};
 
 /// Easily define a basic device.
 #[macro_export]
@@ -278,63 +278,6 @@ impl Iterator for Hardware {
 /// Get a `JClass` of the provided type.
 pub fn get_class<'local>(env: &mut Env<'local>, jni_class: impl AsRef<str>) -> JClass<'local> {
     env.load_class(JNIString::new(jni_class)).unwrap()
-}
-
-/// Generate an implementation of `IntoJniObject` for an enum.
-#[macro_export]
-macro_rules! enum_variant_into {
-    {
-        $vis:vis body, $jni_class:literal,
-        $java_class:literal,
-        $($variant:ident),*
-        $(; PREFIX = $prefix:ident)?
-        $(; suffix = $suffix:ident)?
-        $(,)?
-        $(;)?
-    } => {
-        $crate::pastey::paste!{
-            /// JNI class
-            $vis const [< $($prefix)? JNI_CLASS >]: &'static str = $jni_class;
-            /// Java class
-            $vis const [< $($prefix)? JAVA_CLASS >]: &'static str = $java_class;
-            /// conversion
-            $vis fn [< into_jni_object $($suffix)? >]<'local>(self, env: &mut $crate::jni::Env<'local>) -> $crate::jni::objects::JObject<'local> {
-                let class = $crate::hardware::get_class(env, Self:: [< $($prefix)? JNI_CLASS >]);
-                env
-                    .get_static_field(
-                        class,
-                        $crate::jni::strings::JNIString::new(match self {
-                            $(Self:: $variant => stringify!($variant).to_uppercase()),*
-                        }),
-                        $crate::jni::signature::RuntimeFieldSignature::from_str(concat!("L", $jni_class, ";")).unwrap().field_signature(),
-                    )
-                    .unwrap()
-                    .l()
-                    .unwrap()
-            }
-
-            /// conversion
-            $vis fn [< from_jni_object $($suffix)? >](
-                vm: &$crate::jni::JavaVM,
-                obj: $crate::jni::refs::Global<$crate::jni::objects::JObject<'static>>,
-            ) -> Self {
-                let res = vm.attach_current_thread(|env| call_method!(env env, obj, "ordinal", "()I", []).unwrap().i()).unwrap();
-                let items = vec![$(Self:: $variant),*];
-                items[res as usize]
-            }
-        }
-    };
-    {
-        $ty:ty,
-        $jni_class:literal,
-        $java_class:literal,
-        $($variant:ident),*
-        $(,)?
-    } => {
-        impl $crate::hardware::IntoJniObject for $ty {
-            enum_variant_into!(body, $jni_class, $java_class, $($variant),*);
-        }
-    };
 }
 
 /// Convert this type to/from a JNI object.
@@ -1247,13 +1190,13 @@ impl HardwareDevice {
 #[must_use]
 pub struct Pose3D {
     /// In millimeters.
-    pub pos: Vec3,
+    pub pos: DVec3,
     /// A 3D orientation. The axis mapping is defined by the code that
     /// instanciates this or the Java class this is based on.
     pub orientation: YawPitchRollAngles,
 }
 
-impl IntoJniObject for Vec3 {
+impl IntoJniObject for DVec3 {
     const JAVA_CLASS: &'static str = "org.firstinspires.ftc.robotcore.external.navigation.Position";
     const JNI_CLASS: &'static str = "org/firstinspires/ftc/robotcore/external/navigation/Position";
 
@@ -1264,10 +1207,10 @@ impl IntoJniObject for Vec3 {
 
             let obj = call_method!(env env, obj, "toUnit", "(Lorg/firstinspires/ftc/robotcore/external/navigation/DistanceUnit;)Lorg/firstinspires/ftc/robotcore/external/navigation/Position;", [&unit_mm])?.l()?;
 
-            jni::errors::Result::Ok(Vec3 {
-                x: get_field!(double env, obj, "x") as f32,
-                y: get_field!(double env, obj, "y") as f32,
-                z: get_field!(double env, obj, "z") as f32,
+            jni::errors::Result::Ok(DVec3 {
+                x: get_field!(double env, obj, "x"),
+                y: get_field!(double env, obj, "y"),
+                z: get_field!(double env, obj, "z"),
             })
         }).unwrap()
     }
@@ -1294,9 +1237,9 @@ impl IntoJniObject for Vec3 {
             ),
             &[
                 (&unit_mm).into(),
-                f64::from(self.x).into(),
-                f64::from(self.y).into(),
-                f64::from(self.z).into(),
+                self.x.into(),
+                self.y.into(),
+                self.z.into(),
                 0i64.into(),
             ],
         )
@@ -1336,7 +1279,7 @@ impl IntoJniObject for Pose3D {
             .unwrap();
 
         Self {
-            pos: Vec3::from_jni_object(vm, pos),
+            pos: DVec3::from_jni_object(vm, pos),
             orientation: YawPitchRollAngles::from_jni_object(vm, orientation),
         }
     }

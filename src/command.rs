@@ -6,7 +6,10 @@ use std::{
     convert::Infallible,
     fmt::Debug,
     panic::{AssertUnwindSafe, catch_unwind},
-    sync::{Arc, LazyLock, atomic::AtomicUsize},
+    sync::{
+        Arc, LazyLock,
+        atomic::{AtomicU64, AtomicUsize},
+    },
     thread::JoinHandle,
     time::Duration,
 };
@@ -22,7 +25,7 @@ pub(crate) static SCHEDULER: LazyLock<RwLock<CommandScheduler>> = LazyLock::new(
         empty: Arc::new(Condvar::new()),
         empty_mutex: Arc::new(Mutex::new(false)),
         queue_len: Arc::new(AtomicUsize::new(0)),
-        command_i: AtomicUsize::new(0),
+        command_i: AtomicU64::new(0),
         commands: Arc::new(Mutex::new(HashMap::with_capacity(16))),
         runner_thread: None,
     })
@@ -50,10 +53,33 @@ pub enum CommandState {
     Panicked(PanicText),
 }
 
+impl CommandState {
+    /// Whether this state represents a command that is no longer running (`Finished` or
+    /// `Panicked`).
+    pub fn ended(&self) -> bool {
+        matches!(self, Self::Finished | Self::Panicked(_))
+    }
+    /// The text for a panic from the associated command, if one exists.
+    pub fn panic_text(self) -> Option<PanicText> {
+        match self {
+            Self::Panicked(text) => Some(text),
+            _ => None,
+        }
+    }
+}
+
 /// An ID identifying a [`StoredCommand`].
-type CommandId = usize;
+type CommandId = u64;
+
 /// The data stored that represents a command.
-type StoredCommand = (Box<dyn Command>, CommandState);
+struct StoredCommand {
+    /// The actual command.
+    cmd: Box<dyn Command>,
+    /// The current state of the command.
+    state: CommandState,
+    /// Commands to schedule after the command finishes.
+    schedule_after: Vec<Box<dyn Command>>,
+}
 
 /// The command scheduler.
 pub struct CommandScheduler {
@@ -64,7 +90,7 @@ pub struct CommandScheduler {
     /// Mutex used with the empty condvar.
     empty_mutex: Arc<Mutex<bool>>,
     /// Counter used to assign command IDs.
-    command_i: AtomicUsize,
+    command_i: AtomicU64,
     /// Stored commands
     commands: Arc<Mutex<HashMap<CommandId, StoredCommand>>>,
     /// The runner thread.
@@ -90,9 +116,14 @@ impl CommandScheduler {
         let id = self
             .command_i
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.commands
-            .lock()
-            .insert(id, (Box::new(command), CommandState::Initializing));
+        self.commands.lock().insert(
+            id,
+            StoredCommand {
+                cmd: Box::new(command),
+                state: CommandState::Initializing,
+                schedule_after: Vec::new(),
+            },
+        );
         CommandHandle { id }
     }
     /// Waits until the queue is clear.
@@ -126,7 +157,7 @@ impl CommandScheduler {
 
         self.runner_thread = Some((
             std::thread::Builder::new()
-                .name("OpModeCommandScheduler".to_string())
+                .name("op mode command scheduler".to_string())
                 .spawn(move || {
                     ctx.init_thread_silent();
                     loop {
@@ -142,7 +173,12 @@ impl CommandScheduler {
                             .store(commands_locked.len(), std::sync::atomic::Ordering::Release);
 
                         std::thread::scope(|s| {
-                            for (cmd, state) in commands_locked.values_mut() {
+                            for StoredCommand {
+                                cmd,
+                                state,
+                                schedule_after,
+                            } in commands_locked.values_mut()
+                            {
                                 let ctx = ctx.clone();
                                 s.spawn(move || {
                                     ctx.init_thread();
@@ -155,9 +191,7 @@ impl CommandScheduler {
                                                 *state = CommandState::Executing;
                                             }
                                             CommandState::Executing => {
-                                                if cmd.try_run(&ctx) {
-                                                    cmd.execute(&ctx);
-                                                }
+                                                cmd.execute(&ctx);
                                             }
                                         }
                                         if *state != CommandState::Finished
@@ -168,6 +202,11 @@ impl CommandScheduler {
                                             cmd.end(&ctx);
                                         }
                                     }));
+                                    if state.ended() {
+                                        for command in schedule_after.drain(..) {
+                                            command.schedule();
+                                        }
+                                    }
                                     match res {
                                         Ok(()) => {}
                                         Err(_) => {
@@ -221,7 +260,7 @@ impl CommandHandle {
             .lock()
             .get(&self.id)
             .unwrap()
-            .1
+            .state
             .clone()
     }
     /// Stop this command. This will not halt it if it is currently executing and locked up, but it
@@ -233,7 +272,105 @@ impl CommandHandle {
             .lock()
             .get_mut(&self.id)
             .unwrap()
-            .1 = CommandState::Finished;
+            .state = CommandState::Finished;
+    }
+    /// Run the provided command after this command finishes.
+    pub fn run_after(&self, cmd: impl Command) {
+        SCHEDULER
+            .write()
+            .commands
+            .lock()
+            .get_mut(&self.id)
+            .unwrap()
+            .schedule_after
+            .push(Box::new(cmd));
+    }
+}
+
+struct Sequence<A: Command, B: Command> {
+    a: A,
+    a_done: bool,
+    b: B,
+}
+
+impl<A: Command, B: Command> Command for Sequence<A, B> {
+    fn init(&mut self, ctx: &FtcContext) {
+        if !self.a_done {
+            self.a.init(ctx);
+        } else {
+            self.b.init(ctx);
+        }
+    }
+    fn execute(&mut self, ctx: &FtcContext) {
+        if !self.a_done {
+            self.a.execute(ctx);
+        } else {
+            self.b.execute(ctx);
+        }
+    }
+    fn is_finished(&mut self, ctx: &FtcContext) -> bool {
+        if !self.a_done {
+            self.a_done = self.a.is_finished(ctx);
+            false
+        } else {
+            self.b.is_finished(ctx)
+        }
+    }
+    fn end(&mut self, ctx: &FtcContext) {
+        if !self.a_done {
+            self.a.end(ctx);
+        } else {
+            self.b.end(ctx);
+        }
+    }
+    fn name(&self) -> String {
+        format!("Sequence<{}, {}>", self.a.name(), self.b.name())
+    }
+}
+
+struct Parallel<A: Command, B: Command> {
+    a: A,
+    a_done: bool,
+    b: B,
+    b_done: bool,
+}
+
+impl<A: Command, B: Command> Command for Parallel<A, B> {
+    fn init(&mut self, ctx: &FtcContext) {
+        if !self.a_done {
+            self.a.init(ctx);
+        }
+        if !self.b_done {
+            self.b.init(ctx);
+        }
+    }
+    fn execute(&mut self, ctx: &FtcContext) {
+        if !self.a_done {
+            self.a.execute(ctx);
+        }
+        if !self.b_done {
+            self.b.execute(ctx);
+        }
+    }
+    fn is_finished(&mut self, ctx: &FtcContext) -> bool {
+        if !self.a_done {
+            self.a_done = self.a.is_finished(ctx);
+        }
+        if !self.b_done {
+            self.b_done = self.b.is_finished(ctx);
+        }
+        self.a_done && self.b_done
+    }
+    fn end(&mut self, ctx: &FtcContext) {
+        if !self.a_done {
+            self.a.end(ctx);
+        }
+        if !self.b_done {
+            self.b.end(ctx);
+        }
+    }
+    fn name(&self) -> String {
+        format!("Parallel<{}, {}>", self.a.name(), self.b.name())
     }
 }
 
@@ -248,23 +385,39 @@ pub trait Command: Send + Sync + 'static {
     fn init(&mut self, ctx: &FtcContext) {}
     /// Execute this command. Called in a loop and should not block for too long
     /// for risk of holding up the command queue.
-    fn execute(&mut self, ctx: &FtcContext);
-    /// Whether to attempt to run this command. If not overridden, always
-    /// returns true.
-    ///
-    /// Only called during the execute phase, and called before actually running it.
-    fn try_run(&self, ctx: &FtcContext) -> bool {
-        true
-    }
+    fn execute(&mut self, ctx: &FtcContext) {}
     /// Return whether this command has finished or not. If not overridden,
     /// always returns false (meaning it runs forever).
-    fn is_finished(&self, ctx: &FtcContext) -> bool {
+    fn is_finished(&mut self, ctx: &FtcContext) -> bool {
         false
     }
     /// Ran after [`Command::is_finished`] returns true.
     fn end(&mut self, ctx: &FtcContext) {}
-    /// Schedule this command. For no-op commands like () or Infalliable, does
-    /// nothing.
+    /// After this command finishes, run this command.
+    fn sequence(self, next: impl Command) -> impl Command
+    where
+        Self: Sized,
+    {
+        Sequence {
+            a: self,
+            a_done: false,
+            b: next,
+        }
+    }
+    /// Run these two commands at the same time
+    fn parallel(self, next: impl Command) -> impl Command
+    where
+        Self: Sized,
+    {
+        Parallel {
+            a: self,
+            a_done: false,
+            b: next,
+            b_done: false,
+        }
+    }
+
+    /// Schedule this command.
     fn schedule(self) -> CommandHandle
     where
         Self: Sized,
@@ -273,16 +426,47 @@ pub trait Command: Send + Sync + 'static {
     }
 }
 
+/// A type that can be converted to a command.
+pub trait IntoCommand {
+    /// The type of the command it is converted into.
+    type Cmd: Command + Sized;
+    /// Convert this into a command.
+    fn into_command(self) -> Self::Cmd;
+
+    /// Schedule this command.
+    fn schedule(self) -> CommandHandle
+    where
+        Self: Sized,
+    {
+        self.into_command().schedule()
+    }
+}
+
+impl<C: Command + ?Sized> Command for Box<C> {
+    fn init(&mut self, ctx: &FtcContext) {
+        (**self).init(ctx);
+    }
+    fn execute(&mut self, ctx: &FtcContext) {
+        (**self).execute(ctx);
+    }
+    fn end(&mut self, ctx: &FtcContext) {
+        (**self).end(ctx);
+    }
+    fn is_finished(&mut self, ctx: &FtcContext) -> bool {
+        (**self).is_finished(ctx)
+    }
+    fn name(&self) -> String {
+        (**self).name()
+    }
+}
+
 impl Command for () {
     fn name(&self) -> String {
         "unit command".to_string()
     }
     fn execute(&mut self, _: &FtcContext) {}
-    fn is_finished(&self, _: &FtcContext) -> bool {
+    fn is_finished(&mut self, _: &FtcContext) -> bool {
         true
-    }
-    fn try_run(&self, _: &FtcContext) -> bool {
-        false
     }
 }
 
@@ -296,20 +480,11 @@ impl Command for Infallible {
     fn execute(&mut self, _: &FtcContext) {
         match *self {}
     }
-    fn is_finished(&self, _: &FtcContext) -> bool {
-        match *self {}
-    }
-    fn try_run(&self, _: &FtcContext) -> bool {
+    fn is_finished(&mut self, _: &FtcContext) -> bool {
         match *self {}
     }
     fn end(&mut self, _: &FtcContext) {
         match *self {}
-    }
-    fn schedule(self) -> CommandHandle
-    where
-        Self: Sized,
-    {
-        match self {} // no point in attempting to schedule this, as this point is unreachable
     }
 }
 
@@ -339,14 +514,7 @@ impl<T: Command> Command for VecDeque<T> {
             }
         }
     }
-    fn try_run(&self, ctx: &FtcContext) -> bool {
-        if let Some(cmd) = self.front() {
-            cmd.try_run(ctx)
-        } else {
-            false
-        }
-    }
-    fn is_finished(&self, _: &FtcContext) -> bool {
+    fn is_finished(&mut self, _: &FtcContext) -> bool {
         self.is_empty()
     }
 }
@@ -377,14 +545,15 @@ impl<T: Command> Command for Vec<T> {
             }
         }
     }
-    fn try_run(&self, ctx: &FtcContext) -> bool {
-        if let Some(cmd) = self.first() {
-            cmd.try_run(ctx)
-        } else {
-            false
-        }
-    }
-    fn is_finished(&self, _: &FtcContext) -> bool {
+    fn is_finished(&mut self, _: &FtcContext) -> bool {
         self.is_empty()
     }
 }
+
+impl<T: Command, V: IntoIterator<Item = T>> IntoCommand for V {
+    type Cmd = Vec<T>;
+    fn into_command(self) -> Self::Cmd {
+        self.into_iter().collect()
+    }
+}
+

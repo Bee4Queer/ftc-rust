@@ -385,6 +385,22 @@ pub fn ftc(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
 
+    if func.sig.asyncness.is_none() && linear {
+        return quote_spanned! {func.sig.ident.span()=>
+            compile_error!("linear op mode must be async");
+            #func
+        }
+        .into();
+    }
+
+    if func.sig.asyncness.is_some() && iterative {
+        return quote_spanned! {func.sig.ident.span()=>
+            compile_error!("iterative op mode cannot be async");
+            #func
+        }
+        .into();
+    }
+
     let java_bindings_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
         .parent()
         .unwrap()
@@ -424,7 +440,11 @@ public class {class_name} extends {2} {{
             "Autonomous"
         },
         if iterative { "OpMode" } else { "LinearOpMode" },
-        if cfg!(feature = "sloth") { "import dev.frozenmilk.sinister.loading.Pinned;" } else { "" },
+        if cfg!(feature = "sloth") {
+            "import dev.frozenmilk.sinister.loading.Pinned;"
+        } else {
+            ""
+        },
         name,
         if let Some(group) = group {
             format!(", group = \"{group}\"")
@@ -437,7 +457,11 @@ public class {class_name} extends {2} {{
             String::new()
         },
         if disabled { "@Disabled" } else { "" },
-        if cfg!(feature = "sloth") { "@Pinned" } else { "" },
+        if cfg!(feature = "sloth") {
+            "@Pinned"
+        } else {
+            ""
+        },
         if linear {
             "@Override\n    public native void runOpMode();".to_string()
         } else {
@@ -520,13 +544,22 @@ public class {class_name} extends {2} {{
 
                         #disabled_code
 
-                        let cmd = #func_name (&ctx);
+                        let rt_ctx = ctx.clone();
+                        let rt = ::#ftc::tokio::runtime::Builder::new_multi_thread()
+                                    .name(concat!("opmode ", stringify!(#class_name), " tokio worker"))
+                                    .on_thread_start(move || rt_ctx.init_thread())
+                                    .enable_all()
+                                    .build()
+                                    .unwrap();
+
+                        ctx.run_scheduler();
+
+                        let cmd = rt.block_on(#func_name (&ctx));
 
                         ::#ftc::command::Command::schedule(cmd);
 
-                        ::#ftc::log::trace!(concat!("finished executing ", stringify!(#class_name), ", beginning scheduler and waiting until queue clear"));
+                        ::#ftc::log::trace!(concat!("finished executing ", stringify!(#class_name), ", waiting until scheduler queue clear"));
 
-                        ctx.run_scheduler();
                         ::#ftc::command::get_scheduler().wait_until_queue_clear();
 
                         Ok(())

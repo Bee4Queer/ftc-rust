@@ -27,13 +27,14 @@ use jni::{
 pub use log;
 use log::{info, trace, warn};
 use parking_lot::{Mutex, MutexGuard};
-
-use crate::{
-    command::{Command, SCHEDULER}, hardware::{Hardware, IntoJniObject}, pedro::Pedro,
-};
-
 #[doc(hidden)]
 pub use pastey;
+
+pub use glam;
+
+use crate::{
+    command::{Command, IntoCommand, SCHEDULER}, hardware::{Hardware, IntoJniObject},
+};
 
 /// Commonly used items.
 pub mod prelude {
@@ -41,8 +42,12 @@ pub mod prelude {
 
     pub use crate::{
         Button, FtcContext, Gamepad, IterativeContext, OpModeStage, OpModeType, Telemetry,
-        command::Command, device, hardware::*,
+        command::{Command, IntoCommand}, device, hardware::*,
     };
+
+    pub use glam::{self, DVec2, DVec3};
+    pub use log;
+    pub use ftc_rust_proc::ftc;
 }
 
 pub mod command;
@@ -295,20 +300,23 @@ impl<F: FnMut(&FtcContext, PressEdge) + 'static + Send + Sync> Command for Butto
         )
     }
     fn execute(&mut self, ctx: &FtcContext) {
-        (self.f)(ctx, self.edge);
-    }
-    fn try_run(&self, ctx: &FtcContext) -> bool {
         let gamepad = match self.gamepad {
             WhichGamepad::Gamepad1 => ctx.gamepad1(),
             WhichGamepad::Gamepad2 => ctx.gamepad2(),
         };
 
-        match self.edge {
+        let should_run = match self.edge {
             PressEdge::WhilePressed => gamepad.is_pressed(self.button),
             PressEdge::WhileReleased => gamepad.is_released(self.button),
             PressEdge::Press => gamepad.was_pressed(self.button),
             PressEdge::Release => gamepad.was_released(self.button),
+        };
+
+        if !should_run {
+            return;
         }
+
+        (self.f)(ctx, self.edge);
     }
 }
 
@@ -343,29 +351,25 @@ impl<F: FnMut(&FtcContext, f64) + 'static + Send + Sync> Command for StickComman
             WhichGamepad::Gamepad1 => ctx.gamepad1(),
             WhichGamepad::Gamepad2 => ctx.gamepad2(),
         };
-
         let value = gamepad.get_stick(self.stick);
-
-        (self.f)(ctx, value);
-    }
-    fn try_run(&self, ctx: &FtcContext) -> bool {
-        let gamepad = match self.gamepad {
-            WhichGamepad::Gamepad1 => ctx.gamepad1(),
-            WhichGamepad::Gamepad2 => ctx.gamepad2(),
-        };
-        let value = gamepad.get_stick(self.stick);
-        let value = if self.abs { value } else { value.abs() };
+        let abs_value = if self.abs { value } else { value.abs() };
         let threshold = if self.abs {
             self.threshold
         } else {
             self.threshold.abs()
         };
 
-        if threshold < 0.0 {
-            value < threshold
+        let should_call = if threshold < 0.0 {
+            abs_value < threshold
         } else {
-            value > threshold
+            abs_value > threshold
+        };
+
+        if !should_call {
+            return;
         }
+
+        (self.f)(ctx, value);
     }
 }
 
@@ -884,13 +888,15 @@ impl Debug for FtcContext {
     }
 }
 
+fn clone_global_ref(vm: &JavaVM, vref: &Global<JObject<'static>>) -> Global<JObject<'static>> {
+    vm.attach_current_thread(|env| env.new_global_ref(vref))
+        .unwrap()
+}
+
 impl Clone for FtcContext {
     fn clone(&self) -> Self {
         Self {
-            this: self
-                .vm
-                .attach_current_thread(|env| env.new_global_ref(&self.this))
-                .unwrap(),
+            this: clone_global_ref(&self.vm, &self.this),
             vm: self.vm.clone(),
             kind: self.kind,
             name: self.name,
@@ -1076,17 +1082,23 @@ impl FtcContext {
 
     /// Pedro
     #[cfg(feature = "pedro-pathing")]
-    pub fn pedro(&self, start_pose: pedro::Pose) -> Pedro {
+    pub fn pedro(&self, start_pose: pedro::Pose) -> pedro::Pedro {
         self.pedro_with_constants("org/firstinspires/teamcode/pedro/Constants", start_pose)
     }
-    /// The constants class name should be specified in JNI form, meaning the default is `org/firstinspires/teamcode/pedro/Constants`.
-    /// 
-    /// If you have the class nested in another class, replace the . in the Java name with $. All other .s should become /s.
+    /// The constants class name should be specified in JNI form, meaning the default is
+    /// `org/firstinspires/teamcode/pedro/Constants`.
+    ///
+    /// If you have the class nested in another class, replace the . in the Java name with $. All
+    /// other .s should become /s.
     #[cfg(feature = "pedro-pathing")]
-    pub fn pedro_with_constants(&self, constants_class: impl AsRef<str>, start_pose: pedro::Pose) -> Pedro {
-        Pedro::new(self, constants_class, start_pose)
+    pub fn pedro_with_constants(
+        &self,
+        constants_class: impl AsRef<str>,
+        start_pose: pedro::Pose,
+    ) -> pedro::Pedro {
+        pedro::Pedro::new(self, constants_class, start_pose)
     }
-    
+
     /// Whether the currently running opmode is iterative.
     #[must_use]
     pub fn is_iterative(&self) -> bool {
@@ -1373,7 +1385,13 @@ macro_rules! iterative_stages {
                 /// previous callbacks and just adds another. Implicitly wrapped in [`FtcContext::with_state`]; use the state through the &mut T reference.
                 ///
                 $(#[$meta])*
-                pub fn [<# $stage>]<T: Any + Default + Send + Sync + 'static, C: Command>(&self, f: impl FnMut(&FtcContext, &mut T) -> C + Send + 'static) {
+                pub fn [<# $stage>]<
+                    T: Any + Default + Send + Sync + 'static,
+                    C: IntoCommand
+                >(
+                    &self,
+                    f: impl FnMut(&FtcContext, &mut T) -> C + Send + 'static
+                ) {
                     self.register(IterativeCallback::[< $stage:upper_camel >], f);
                 }
                 #[doc(hidden)]
@@ -1432,7 +1450,7 @@ impl IterativeContext<*const ()> {
     }
     /// Register a new callback. Does NOT overwrite any previous callbacks
     /// and just adds another.
-    pub fn register<T: Any + Default + Send + Sync + 'static, C: Command>(
+    pub fn register<T: Any + Default + Send + Sync + 'static, C: IntoCommand>(
         &self,
         at: IterativeCallback,
         mut f: impl FnMut(&FtcContext, &mut T) -> C + Send + 'static,

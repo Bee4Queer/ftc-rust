@@ -679,7 +679,7 @@ pub struct LLTimestamp(f64);
 pub mod results {
     use std::time::Duration;
 
-    use glam::Vec3;
+    use glam::DVec3;
     use jni::objects::JList;
 
     use crate::{
@@ -746,7 +746,7 @@ pub mod results {
         pub ty_deg_nc: f64,
         /// The area of the target as a percentage of the image area.
         pub ta: f64,
-        pub target_corners: Vec<Vec3>,
+        pub target_corners: Vec<DVec3>,
     }
 
     impl IntoJniObject for BarcodeResult {
@@ -773,10 +773,10 @@ pub mod results {
 
                 while let Some(corner) = corners.next(env)? {
                     let corner = JList::cast_local(env, corner)?;
-                    out_corners.push(Vec3 {
-                        x: index_jlist!(double env, corner; [0]) as f32,
-                        y: index_jlist!(double env, corner; [1]) as f32,
-                        z: index_jlist!(double env, corner; [2]) as f32,
+                    out_corners.push(DVec3 {
+                        x: index_jlist!(double env, corner; [0]),
+                        y: index_jlist!(double env, corner; [1]),
+                        z: index_jlist!(double env, corner; [2]),
                     });
                 }
 
@@ -854,7 +854,7 @@ pub mod results {
         pub ty_deg_nc: f64,
         /// The area of the target as a percentage of the image area.
         pub ta: f64,
-        pub target_corners: Vec<Vec3>,
+        pub target_corners: Vec<DVec3>,
     }
 
     impl IntoJniObject for DetectorResult {
@@ -881,10 +881,10 @@ pub mod results {
 
                 while let Some(corner) = corners.next(env)? {
                     let corner = JList::cast_local(env, corner)?;
-                    out_corners.push(Vec3 {
-                        x: index_jlist!(double env, corner; [0]) as f32,
-                        y: index_jlist!(double env, corner; [1]) as f32,
-                        z: index_jlist!(double env, corner; [2]) as f32,
+                    out_corners.push(DVec3 {
+                        x: index_jlist!(double env, corner; [0]),
+                        y: index_jlist!(double env, corner; [1]),
+                        z: index_jlist!(double env, corner; [2]),
                     });
                 }
 
@@ -932,7 +932,7 @@ pub mod results {
         pub ty_deg_nc: f64,
         /// The area of the target as a percentage of the image area.
         pub ta: f64,
-        pub target_corners: Vec<Vec3>,
+        pub target_corners: Vec<DVec3>,
     }
 
     impl IntoJniObject for FiducialResult {
@@ -959,10 +959,10 @@ pub mod results {
 
                 while let Some(corner) = corners.next(env)? {
                     let corner = JList::cast_local(env, corner)?;
-                    out_corners.push(Vec3 {
-                        x: index_jlist!(double env, corner; [0]) as f32,
-                        y: index_jlist!(double env, corner; [1]) as f32,
-                        z: index_jlist!(double env, corner; [2]) as f32,
+                    out_corners.push(DVec3 {
+                        x: index_jlist!(double env, corner; [0]),
+                        y: index_jlist!(double env, corner; [1]),
+                        z: index_jlist!(double env, corner; [2]),
                     });
                 }
 
@@ -1027,7 +1027,7 @@ pub mod results {
         /// The area of the target as a percentage of the image area.
         pub ta: f64,
         /// Corner points of the target.
-        pub target_corners: Vec<Vec3>,
+        pub target_corners: Vec<DVec3>,
     }
 
     impl IntoJniObject for ColorResult {
@@ -1054,10 +1054,10 @@ pub mod results {
 
                 while let Some(corner) = corners.next(env)? {
                     let corner = JList::cast_local(env, corner)?;
-                    out_corners.push(Vec3 {
-                        x: index_jlist!(double env, corner; [0]) as f32,
-                        y: index_jlist!(double env, corner; [1]) as f32,
-                        z: index_jlist!(double env, corner; [2]) as f32,
+                    out_corners.push(DVec3 {
+                        x: index_jlist!(double env, corner; [0]),
+                        y: index_jlist!(double env, corner; [1]),
+                        z: index_jlist!(double env, corner; [2]),
                     });
                 }
 
