@@ -2,7 +2,7 @@
 
 use std::fmt::Debug;
 
-use glam::DVec2;
+use glam::{DVec2, dvec2};
 use jni::{
     JValueOwned, jni_sig, jni_str, objects::JObject, refs::Global, strings::JNIString, vm::JavaVM,
 };
@@ -232,11 +232,26 @@ enum_variant_into! {
 
 /// A pose in Pedro Pathing.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[must_use]
 pub struct Pose {
     /// In inches.
     pub pos: DVec2,
     /// In radians.
     pub heading: f64,
+}
+
+impl Pose {
+    /// Create a new `Pose` from the provided X, Y, and heading. Heading is in degrees.
+    pub fn new_degrees(x: f64, y: f64, heading: f64) -> Self {
+        Self::new_radians(x, y, heading.to_radians())
+    }
+    /// Create a new `Pose` from the provided X, Y, and heading. Heading is in radians.
+    pub fn new_radians(x: f64, y: f64, heading: f64) -> Self {
+        Self {
+            pos: dvec2(x, y),
+            heading,
+        }
+    }
 }
 
 impl IntoJniObject for Pose {
@@ -410,7 +425,7 @@ impl Path {
         Self::combine([self, other])
     }
 
-    /// Set heading interpolation to be linear from `start_heading` to `end_heading`.
+    /// Set heading interpolation to be linear from `start_heading` to `end_heading`. The provided headings are in radians.
     #[doc(alias = "linear")]
     pub fn heading_linear(self, start_heading: f64, end_heading: f64) -> Path {
         let path = self
@@ -434,7 +449,8 @@ impl Path {
         }
     }
 
-    /// Set heading interpolation to be tangent. Basically this means that the robot will face in the direction of travel.
+    /// Set heading interpolation to be tangent. Basically this means that the robot will face in
+    /// the direction of travel.
     #[doc(alias = "tangent")]
     pub fn heading_tangent(self) -> Path {
         let path = self
@@ -458,7 +474,7 @@ impl Path {
         }
     }
 
-    /// Set the heading to be constant throughout the entire path.
+    /// Set the heading to be constant throughout the entire path. The provided heading is in radians.
     #[doc(alias = "constant")]
     pub fn heading_constant(self, heading: f64) -> Path {
         let path = self

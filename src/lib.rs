@@ -15,6 +15,7 @@ use std::{
 
 #[cfg(feature = "proc-macro")]
 pub use ftc_rust_proc::ftc;
+pub use glam;
 pub use jni;
 use jni::{
     elements::ReleaseMode,
@@ -30,24 +31,23 @@ use parking_lot::{Mutex, MutexGuard};
 #[doc(hidden)]
 pub use pastey;
 
-pub use glam;
-
 use crate::{
-    command::{Command, SCHEDULER}, hardware::{Hardware, IntoJniObject},
+    command::{Command, SCHEDULER},
+    hardware::{Hardware, IntoJniObject},
 };
 
 /// Commonly used items.
 pub mod prelude {
-    pub use log::{debug, error, info, trace, warn};
+    pub use ftc_rust_proc::ftc;
+    pub use glam::{self, DVec2, DVec3};
+    pub use log::{self, debug, error, info, trace, warn};
 
     pub use crate::{
         Button, FtcContext, Gamepad, IterativeContext, OpModeStage, OpModeType, Telemetry,
-        command::{Command, IntoCommand}, device, hardware::*,
+        command::{Command, IntoCommand},
+        device,
+        hardware::*,
     };
-
-    pub use glam::{self, DVec2, DVec3};
-    pub use log;
-    pub use ftc_rust_proc::ftc;
 }
 
 pub mod command;

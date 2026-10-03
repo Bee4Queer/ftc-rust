@@ -2,7 +2,9 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use std::{
-    any::type_name, fmt::{Debug, Display}, ops::Neg,
+    any::type_name,
+    fmt::{Debug, Display},
+    ops::Neg,
 };
 
 use glam::{DVec3, Quat, vec4};

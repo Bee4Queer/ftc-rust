@@ -556,4 +556,3 @@ impl<T: Command, V: IntoIterator<Item = T>> IntoCommand for V {
         self.into_iter().collect()
     }
 }
-
