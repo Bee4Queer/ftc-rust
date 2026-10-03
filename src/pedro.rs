@@ -372,6 +372,12 @@ impl Pedro {
     }
 }
 
+impl AsRef<Path> for Path {
+    fn as_ref(&self) -> &Path {
+        self
+    }
+}
+
 impl Path {
     /// Combine the listed paths.
     #[track_caller]
