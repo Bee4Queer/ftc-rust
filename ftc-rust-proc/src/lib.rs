@@ -528,17 +528,9 @@ public class {class_name} extends {2} {{
 
                         #disabled_code
 
-                        let rt_ctx = ctx.clone();
-                        let rt = ::#ftc::tokio::runtime::Builder::new_multi_thread()
-                                    .name(concat!("opmode ", stringify!(#class_name), " tokio worker"))
-                                    .on_thread_start(move || rt_ctx.init_thread())
-                                    .enable_all()
-                                    .build()
-                                    .unwrap();
-
                         ctx.run_scheduler();
 
-                        let cmd = rt.block_on(#func_name (&ctx));
+                        let cmd = #func_name (&ctx);
 
                         ::#ftc::command::Command::schedule(cmd);
 
