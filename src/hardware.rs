@@ -2,8 +2,7 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use std::{
-    any::type_name,
-    fmt::{Debug, Display},
+    any::type_name, fmt::{Debug, Display}, ops::Neg,
 };
 
 use glam::{DVec3, Quat, vec4};
@@ -371,6 +370,23 @@ pub enum Direction {
     Forward,
     /// Turn backward. Commonly counterclockwise.
     Reverse,
+}
+
+impl Direction {
+    /// Invert this direction.
+    pub fn invert(self) -> Self {
+        -self
+    }
+}
+
+impl Neg for Direction {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        match self {
+            Self::Forward => Self::Reverse,
+            Self::Reverse => Self::Forward,
+        }
+    }
 }
 
 impl Direction {
