@@ -63,14 +63,10 @@ impl DcMotor {
     /// See [`set_zero_power_behavior`](DcMotor::set_zero_power_behavior) for
     /// what happens when zero power is applied.
     ///
-    /// In debug builds, setting this outside the range of -1.0..=1.0 will
-    /// panic.
+    /// Value is clamped between -1 and +1.
     #[doc(alias = "setPower")]
     pub fn set_power(&self, power: f64) {
-        debug_assert!(
-            (-1.0..=1.0).contains(&power),
-            "motor power/speed should be contained within -1.0..=1.0"
-        );
+        let power = power.clamp(-1.0, 1.0);
 
         call_method!(void self, self.object, "setPower", "(D)V", [power]);
     }
