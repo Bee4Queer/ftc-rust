@@ -930,13 +930,21 @@ impl FtcContext {
         name: &'static str,
         source: &'static Location<'static>,
     ) -> Self {
-        android_logger::init_once(android_logger::Config::default().with_max_level(
-            if cfg!(debug_assertions) {
-                log::LevelFilter::Trace
-            } else {
-                log::LevelFilter::Info
-            },
-        ));
+        use android_logger::FilterBuilder;
+        
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(if cfg!(debug_assertions) {
+                    log::LevelFilter::Trace
+                } else {
+                    log::LevelFilter::Info
+                })
+                .with_filter(
+                    FilterBuilder::new()
+                        .filter(Some("jni::vm::java_vm"), log::LevelFilter::Warn)
+                        .build(),
+                ),
+        );
 
         let out = Self::new_no_log(env, this, kind, name, source);
 
