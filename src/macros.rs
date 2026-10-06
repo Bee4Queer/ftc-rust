@@ -299,7 +299,7 @@ macro_rules! enum_variant_into {
                     .get_static_field(
                         class,
                         $crate::jni::strings::JNIString::new(match self {
-                            $(Self:: $variant => stringify!($variant).to_uppercase()),*
+                            $(Self:: $variant => stringify!([< $variant:snake:upper >]).to_uppercase()),*
                         }),
                         $crate::jni::signature::RuntimeFieldSignature::from_str(concat!("L", $jni_class, ";")).unwrap().field_signature(),
                     )
