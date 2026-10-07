@@ -219,7 +219,8 @@ impl Debug for Hardware {
 
 impl Hardware {
     /// Get a [`Device`] from the hardware map.
-    pub fn get<T: Device>(&self, name: impl AsRef<str>) -> T {
+    // pub fn get<T: Device>(&self, name: impl AsRef<str>) -> T {
+    pub fn get<T: Device>(&self, name: config::HardwareItem<T>) -> T {
         trace!(
             "getting device `{}` of type `{}`",
             name.as_ref(),

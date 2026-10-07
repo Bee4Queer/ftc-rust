@@ -1,6 +1,6 @@
 //! Automatically generate the hardware map configuration.
 
-use std::{fmt::{Debug, Display}, marker::PhantomData};
+use std::{fmt::{Debug, Display}, hash::Hash, marker::PhantomData};
 
 use crate::hardware::Device;
 
@@ -8,9 +8,27 @@ use crate::hardware::Device;
 pub use ftc_rust_proc::config;
 
 /// A hardware item generated with the `config` proc macro.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct HardwareItem<T: Device>(&'static str, PhantomData<T>);
+
+impl<T: Device> Clone for HardwareItem<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T: Device> Copy for HardwareItem<T> {}
+
+impl<T: Device> PartialEq for HardwareItem<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+impl<T: Device> Eq for HardwareItem<T> {}
+impl<T: Device> Hash for HardwareItem<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
 
 impl<T: Device> HardwareItem<T> {
     // SAFETY: Always safe, but will be very very annoying if it's a wrong value.
