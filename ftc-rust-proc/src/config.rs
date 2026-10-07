@@ -292,14 +292,14 @@ struct Config {
 impl Config {
     fn to_xml(&self) -> String {
         fn output_module(out: &mut String, name: impl AsRef<str>, port: u8) {
-            let _ = write!(
+            let _ = writeln!(
                 out,
                 r#"        <LynxModule name="{}" port="{port}">"#,
                 name.as_ref()
             );
         }
         fn end_module(out: &mut String) {
-            out.push_str("        </LynxModule>");
+            out.push_str("        </LynxModule>\n");
         }
 
         fn output_devices(out: &mut String, devices: Vec<&Device>) {
@@ -366,7 +366,7 @@ impl Config {
                         ("LynxEmbeddedIMU", r#" port="0" bus="0""#.to_string())
                     }
                 };
-                let _ = write!(out, r#"<{} name="{}"{} />"#, tag, device.name, attrs);
+                let _ = writeln!(out, r#"<{} name="{}"{} />"#, tag, device.name, attrs);
             }
         }
 
