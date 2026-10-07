@@ -15,7 +15,7 @@ pub struct HardwareItem<T: Device>(&'static str, PhantomData<T>);
 impl<T: Device> HardwareItem<T> {
     // SAFETY: Always safe, but will be very very annoying if it's a wrong value.
     #[doc(hidden)]
-    pub unsafe fn new(id: &'static str) -> Self {
+    pub const unsafe fn new(id: &'static str) -> Self {
         Self(id, PhantomData)
     }
 }
