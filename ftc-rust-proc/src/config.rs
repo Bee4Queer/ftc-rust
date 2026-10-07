@@ -34,20 +34,20 @@ impl Parse for Hub {
 enum MotorKind {
     Generic,
 
-    NeveRest37v1Gearmotor(Token![.], Span),
-    NeveRest20Gearmotor(Token![.], Span),
-    NeveRest40Gearmotor(Token![.], Span),
-    NeveRest60Gearmotor(Token![.], Span),
+    NeveRest37v1Gear(Token![.], Span),
+    NeveRest20Gear(Token![.], Span),
+    NeveRest40Gear(Token![.], Span),
+    NeveRest60Gear(Token![.], Span),
 
-    RevRobotics20HDHexMotor(Token![.], Span),
-    RevRobotics40HDHexMotor(Token![.], Span),
-    RevRoboticsCoreHexMotor(Token![.], Span),
+    RevRobotics20HDHex(Token![.], Span),
+    RevRobotics40HDHex(Token![.], Span),
+    RevRoboticsCoreHex(Token![.], Span),
 
-    GoBilda5201SeriesMotor(Token![.], Span),
+    GoBilda5201(Token![.], Span),
     /// Includes 5202/5203/5204 series motors.
-    GoBilda5202SeriesMotor(Token![.], Span),
+    GoBilda5202(Token![.], Span),
 
-    TetrixMotor(Token![.], Span),
+    Tetrix(Token![.], Span),
 }
 
 impl Parse for MotorKind {
@@ -59,29 +59,27 @@ impl Parse for MotorKind {
         let name: Ident = input.parse()?;
 
         match name.to_string().as_str() {
-            "NeveRest37v1Gearmotor" => Ok(Self::NeveRest37v1Gearmotor(dot, name.span())),
-            "NeveRest20Gearmotor" => Ok(Self::NeveRest20Gearmotor(dot, name.span())),
-            "NeveRest40Gearmotor" => Ok(Self::NeveRest40Gearmotor(dot, name.span())),
-            "NeveRest60Gearmotor" => Ok(Self::NeveRest60Gearmotor(dot, name.span())),
+            "NeveRest37v1Gear" => Ok(Self::NeveRest37v1Gear(dot, name.span())),
+            "NeveRest20Gear" => Ok(Self::NeveRest20Gear(dot, name.span())),
+            "NeveRest40Gear" => Ok(Self::NeveRest40Gear(dot, name.span())),
+            "NeveRest60Gear" => Ok(Self::NeveRest60Gear(dot, name.span())),
 
-            "RevRobotics20HDHexMotor" => Ok(Self::RevRobotics20HDHexMotor(dot, name.span())),
-            "RevRobotics40HDHexMotor" => Ok(Self::RevRobotics40HDHexMotor(dot, name.span())),
-            "RevRoboticsCoreHexMotor" => Ok(Self::RevRoboticsCoreHexMotor(dot, name.span())),
+            "RevRobotics20HDHex" => Ok(Self::RevRobotics20HDHex(dot, name.span())),
+            "RevRobotics40HDHex" => Ok(Self::RevRobotics40HDHex(dot, name.span())),
+            "RevRoboticsCoreHex" => Ok(Self::RevRoboticsCoreHex(dot, name.span())),
 
-            "GoBilda5201SeriesMotor" => Ok(Self::GoBilda5201SeriesMotor(dot, name.span())),
-            "GoBilda5202SeriesMotor" | "GoBilda5203SeriesMotor" | "GoBilda5204SeriesMotor" => {
-                Ok(Self::GoBilda5202SeriesMotor(dot, name.span()))
+            "GoBilda5201" => Ok(Self::GoBilda5201(dot, name.span())),
+            "GoBilda5202" | "GoBilda5203" | "GoBilda5204" => {
+                Ok(Self::GoBilda5202(dot, name.span()))
             }
 
-            "TetrixMotor" => Ok(Self::TetrixMotor(dot, name.span())),
+            "Tetrix" => Ok(Self::Tetrix(dot, name.span())),
 
             _ => Err(Error::new_spanned(
                 name,
-                "expected a valid motor kind (one of NeveRest37v1Gearmotor, NeveRest20Gearmotor, \
-                 NeveRest40Gearmotor, NeveRest60Gearmotor, RevRobotics20HDHexMotor, \
-                 RevRobotics40HDHexMotor, RevRoboticsCoreHexMotor, GoBilda5201SeriesMotor, \
-                 GoBilda5202SeriesMotor, GoBilda5203SeriesMotor, GoBilda5204SeriesMotor, \
-                 TetrixMotor)",
+                "expected a valid motor kind (one of NeveRest37v1Gear, NeveRest20Gear, \
+                 NeveRest40Gear, NeveRest60Gear, RevRobotics20HDHex, RevRobotics40HDHex, \
+                 RevRoboticsCoreHex, GoBilda5201, GoBilda5202, GoBilda5203, GoBilda5204, Tetrix)",
             )),
         }
     }
@@ -315,16 +313,16 @@ impl Config {
                     } => (
                         match kind {
                             MotorKind::Generic => "Motor",
-                            MotorKind::NeveRest37v1Gearmotor(_, _) => "NeveRest3.7v1Gearmotor",
-                            MotorKind::NeveRest20Gearmotor(_, _) => "NeveRest20Gearmotor",
-                            MotorKind::NeveRest40Gearmotor(_, _) => "NeveRest40Gearmotor",
-                            MotorKind::NeveRest60Gearmotor(_, _) => "NeveRest60Gearmotor",
-                            MotorKind::RevRobotics20HDHexMotor(_, _) => "RevRobotics20HDHexMotor",
-                            MotorKind::RevRobotics40HDHexMotor(_, _) => "RevRobotics40HDHexMotor",
-                            MotorKind::RevRoboticsCoreHexMotor(_, _) => "RevRoboticsCoreHexMotor",
-                            MotorKind::GoBilda5201SeriesMotor(_, _) => "goBILDA5201SeriesMotor",
-                            MotorKind::GoBilda5202SeriesMotor(_, _) => "goBILDA5202SeriesMotor",
-                            MotorKind::TetrixMotor(_, _) => "TetrixMotor",
+                            MotorKind::NeveRest37v1Gear(_, _) => "NeveRest3.7v1Gear",
+                            MotorKind::NeveRest20Gear(_, _) => "NeveRest20Gear",
+                            MotorKind::NeveRest40Gear(_, _) => "NeveRest40Gear",
+                            MotorKind::NeveRest60Gear(_, _) => "NeveRest60Gear",
+                            MotorKind::RevRobotics20HDHex(_, _) => "RevRobotics20HDHex",
+                            MotorKind::RevRobotics40HDHex(_, _) => "RevRobotics40HDHex",
+                            MotorKind::RevRoboticsCoreHex(_, _) => "RevRoboticsCoreHex",
+                            MotorKind::GoBilda5201(_, _) => "goBILDA5201",
+                            MotorKind::GoBilda5202(_, _) => "goBILDA5202",
+                            MotorKind::Tetrix(_, _) => "Tetrix",
                         },
                         format!(r#" port="{port}""#),
                     ),
