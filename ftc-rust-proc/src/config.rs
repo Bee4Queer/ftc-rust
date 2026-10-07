@@ -366,7 +366,7 @@ impl Config {
                         ("LynxEmbeddedIMU", r#" port="0" bus="0""#.to_string())
                     }
                 };
-                let _ = writeln!(out, r#"<{} name="{}"{} />"#, tag, device.name, attrs);
+                let _ = writeln!(out, r#"        <{} name="{}"{} />"#, tag, device.name, attrs);
             }
         }
 
