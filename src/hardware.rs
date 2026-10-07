@@ -22,6 +22,7 @@ pub use devices::*;
 pub mod ext;
 pub mod limelight;
 pub mod sensors;
+pub mod config;
 use log::{error, trace};
 
 use crate::{call_method, enum_variant_into, get_field, new_global, new_string};

@@ -14,6 +14,73 @@ use crate::{
 };
 
 device!(
+    /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotorSimple.html>.
+    ///
+    /// Instances of DcMotorSimple interface provide a most basic motor-like functionality
+    DcMotorSimple,
+    JAVA_CLASS = "com.qualcomm.robotcore.hardware.DcMotorSimple";
+    JNI_CLASS = "com/qualcomm/robotcore/hardware/DcMotorSimple";
+);
+
+impl DcMotorSimple {
+    /// Sets the logical direction in which this motor operates.
+    #[doc(alias = "setDirection")]
+    pub fn set_direction(&self, dir: Direction) {
+        trace!("setting direction of DcMotor");
+        self.vm
+            .attach_current_thread(|env| {
+                let obj = dir.into_jni_object_dcmotor(env);
+                call_method!(
+                    env env,
+                    self.object,
+                    "setDirection",
+                    format!("(L{};)V", Direction::DCMOTOR_JNI_CLASS),
+                    [&obj]
+                )?;
+                jni::errors::Result::Ok(())
+            })
+            .unwrap();
+        trace!("set direction of DcMotor");
+    }
+
+    /// Returns the current logical direction in which this motor is operating.
+    #[doc(alias = "getDirection")]
+    pub fn direction(&self) -> Direction {
+        let res = call_method!(
+            obj self,
+            self.object,
+            "getDirection",
+            format!("()L{};", Direction::DCMOTOR_JNI_CLASS),
+            []
+        );
+        Direction::from_jni_object_dcmotor(&self.vm, res)
+    }
+
+    /// Sets the power level of the motor, expressed as a fraction of the
+    /// maximum possible power / speed supported according to the run mode
+    /// in which the motor is operating.
+    ///
+    /// See [`set_zero_power_behavior`](DcMotor::set_zero_power_behavior) for
+    /// what happens when zero power is applied.
+    ///
+    /// Value is clamped between -1 and +1.
+    #[doc(alias = "setPower")]
+    pub fn set_power(&self, power: f64) {
+        let power = power.clamp(-1.0, 1.0);
+
+        call_method!(void self, self.object, "setPower", "(D)V", [power]);
+    }
+
+    /// Returns the current configured power level of the motor.
+    #[doc(alias = "getPower")]
+    #[must_use]
+    pub fn power(&self) -> f64 {
+        call_method!(double self, self.object, "getPower", "()D",
+            [])
+    }
+}
+
+device!(
     /// Javadoc available at <https://javadoc.io/doc/org.firstinspires.ftc/RobotCore/latest/com/qualcomm/robotcore/hardware/DcMotor.html>.
     ///
     /// `DcMotor` provides access to full-featured motor functionality.
@@ -406,8 +473,8 @@ device!(
     /// with the USB ports facing the front of the robot and the REV logo facing the ceiling. To specify
     /// a non-default orientation on the robot, you need to call initialize.
     IMU,
-    JAVA_CLASS = "com.qualcomm.robotcore.hardware.CRServo";
-    JNI_CLASS = "com/qualcomm/robotcore/hardware/CRServo";
+    JAVA_CLASS = "com.qualcomm.robotcore.hardware.IMU";
+    JNI_CLASS = "com/qualcomm/robotcore/hardware/IMU";
 );
 
 impl IMU {
