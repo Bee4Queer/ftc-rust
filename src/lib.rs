@@ -1046,33 +1046,7 @@ impl FtcContext {
         source: &'static Location<'static>,
     ) -> Self {
         std::panic::set_hook(Box::new(|info| {
-            let mut backtrace = String::new();
-
-            for (i, frame) in backtrace::Backtrace::new().frames().iter().enumerate() {
-                backtrace.push_str(&format!(
-                    " {i}: {}\n",
-                    frame
-                        .symbols()
-                        .iter()
-                        .map(|v| format!(
-                            "{}: {}:{}:{}",
-                            v.name()
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("<unknown symbol>"),
-                            v.filename()
-                                .map(|v| v.to_string_lossy())
-                                .unwrap_or("<unknown file>".into()),
-                            v.lineno()
-                                .map(|v| v.to_string())
-                                .unwrap_or("<unknown line>".to_string()),
-                            v.colno()
-                                .map(|v| v.to_string())
-                                .unwrap_or("<unknown column>".to_string())
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
+            let mut backtrace = format!("{:#?}", backtrace::Backtrace::new());
 
             CURRENT_PANIC_TEXT.with(|v| {
                 *v.lock() = Some(PanicText {
