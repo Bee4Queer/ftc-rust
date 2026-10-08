@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Write, path::PathBuf};
+use std::{collections::HashMap, fmt::Write, net::Ipv4Addr, path::PathBuf};
 
 use heck::ToShoutySnekCase;
 use proc_macro2::{Span, TokenStream};
@@ -169,6 +169,12 @@ enum DeviceKind {
         kind: I2CKind,
     },
     EmbeddedIMU(Span),
+    /// EthernetOverUsbConfiguration
+    Limelight {
+        limelight: Span,
+        parens: Paren,
+        ip: (Ipv4Addr, Span),
+    },
 }
 
 impl DeviceKind {
@@ -188,6 +194,7 @@ impl DeviceKind {
             }
             DeviceKind::I2C { .. } => todo!("i2c devices are not currently implemented"),
             DeviceKind::EmbeddedIMU(_) => quote! { ::ftc::hardware::IMU },
+            DeviceKind::Limelight { .. } => quote! { ::ftc::hardware::limelight::Limelight3A },
         }
     }
 }
@@ -259,6 +266,31 @@ impl Parse for DeviceKind {
                     })
                 }
                 "EmbeddedIMU" => Ok(DeviceKind::EmbeddedIMU(root.span())),
+                "Limelight" => {
+                    let ip;
+                    let parens = parenthesized!(ip in input);
+
+                    let oct1 = ip.parse::<LitInt>()?;
+                    let _dot1 = ip.parse::<Token![.]>()?;
+                    let oct2 = ip.parse::<LitInt>()?;
+                    let _dot2 = ip.parse::<Token![.]>()?;
+                    let oct3 = ip.parse::<LitInt>()?;
+                    let _dot3 = ip.parse::<Token![.]>()?;
+                    let oct4 = ip.parse::<LitInt>()?;
+
+                    let ip = Ipv4Addr::from_octets([
+                        oct1.base10_parse::<u8>()?,
+                        oct2.base10_parse::<u8>()?,
+                        oct3.base10_parse::<u8>()?,
+                        oct4.base10_parse::<u8>()?,
+                    ]);
+
+                    Ok(DeviceKind::Limelight {
+                        limelight: root.span(),
+                        parens,
+                        ip: (ip, parens.span.join()),
+                    })
+                }
 
                 _ => Err(Error::new_spanned(
                     root,
@@ -362,6 +394,10 @@ impl Config {
                     DeviceKind::EmbeddedIMU(_) => {
                         ("LynxEmbeddedIMU", r#" port="0" bus="0""#.to_string())
                     }
+                    DeviceKind::Limelight { ip: (ip, _), .. } => (
+                        "EthernetOverUsbConfiguration",
+                        format!(r#" port="0" ipAddress="{ip}""#),
+                    ),
                 };
                 let _ = writeln!(
                     out,
@@ -628,6 +664,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     let mut servos = HashMap::with_capacity(6);
     let mut digitals = HashMap::with_capacity(6);
     let mut i2cs = HashMap::with_capacity(4);
+    let mut ips = HashMap::with_capacity(4);
     let mut has_imu = None;
 
     for device in &cfg.devices {
@@ -638,6 +675,17 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
                 (&mut digitals, port)
             }
             DeviceKind::I2C { bus, .. } => (&mut i2cs, bus),
+            DeviceKind::Limelight { ip, .. } => {
+                if let Some(first) = ips.get(&ip.0) {
+                    let mut err = Error::new(ip.1, "this IP is already defined earlier");
+                    err.combine(Error::new(*first, "IP is defined here"));
+                    return Err(err);
+                }
+
+                ips.insert(ip.0, ip.1);
+
+                continue;
+            },
             DeviceKind::EmbeddedIMU(span) => {
                 if let Some(first) = has_imu {
                     let mut err = Error::new(span, "embedded IMU is already defined earlier");
@@ -656,8 +704,8 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         };
 
         if let Some(first) = hash_set.get(&port.0) {
-            let mut err = Error::new(port.1, "this port is already used earlier");
-            err.combine(Error::new(*first, "port is used here"));
+            let mut err = Error::new(port.1, "this port is already defined earlier");
+            err.combine(Error::new(*first, "port is defined here"));
             return Err(err);
         }
 
@@ -736,7 +784,6 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     });
 
     let them3 = cfg.devices.iter().map(|v| {
-        let name = &v.name;
         let motor = match &v.kind {
             DeviceKind::Motor { motor, .. } => Some(quote_spanned! {*motor=> Motor:: }),
             _ => None,
@@ -772,8 +819,14 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
             DeviceKind::RevTouchSensor { .. } => todo!(),
             DeviceKind::I2C { .. } => todo!(),
             DeviceKind::EmbeddedIMU(span) => quote_spanned! {*span=> EmbeddedIMU},
+            DeviceKind::Limelight { limelight, .. } => quote_spanned! {*limelight=> Limelight3A},
+        };
+        let hub = match v.hub {
+            Hub::ControlHub(span) => quote_spanned! {span=> CTRL_HUB},
+            Hub::ExpansionHub(span) => quote_spanned! {span=> EXP_HUB},
         };
         quote! {
+            let _ = ::#ftc::hardware::config::device_docs:: #hub;
             let _: ::#ftc::hardware::config::device_docs:: #motor #kind;
         }
     });

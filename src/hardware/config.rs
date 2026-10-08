@@ -148,6 +148,9 @@ pub mod device_docs {
     /// The IMU embedded in the control hub. Cannot be used under an expansion hub.
     pub struct EmbeddedIMU;
 
+    /// The Limelight Vision Limelight 3A Vision Sensor. Provides camera functionality.
+    pub struct Limelight3A;
+
     /// The control hub.
     pub static CTRL_HUB: () = ();
     /// The expansion hub.
