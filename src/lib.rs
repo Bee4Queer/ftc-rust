@@ -18,9 +18,10 @@ pub use ftc_rust_proc::ftc;
 pub use glam;
 pub use jni;
 use jni::{
+    JValueOwned,
     elements::ReleaseMode,
     jni_sig, jni_str,
-    objects::{JList, JObject},
+    objects::{JList, JObject, JString},
     refs::{Global, Reference},
     strings::JNIString,
     vm::JavaVM,
@@ -33,7 +34,7 @@ pub use pastey;
 
 use crate::{
     command::{Command, SCHEDULER},
-    hardware::{Hardware, IntoJniObject},
+    hardware::{Hardware, IntoJniObject, config::HardwareConfig},
 };
 
 /// Commonly used items.
@@ -780,6 +781,8 @@ pub struct FtcContext {
     vm: JavaVM,
     /// The op mode class.
     this: Global<JObject<'static>>,
+    /// com/qualcomm/ftccommon/configuration/RobotConfigFileManager
+    cfg_mgr: Global<JObject<'static>>,
     /// The type of this op mode.
     kind: OpModeType,
     /// The name of this op mode.
@@ -846,6 +849,9 @@ static STATE: LazyLock<Mutex<HashMap<OpModeId, Vec<DynState>>>> =
 /// Info about op mode names and source locations.
 static SOURCE_INFO: LazyLock<Mutex<HashMap<OpModeId, (&'static str, &'static Location<'static>)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Whether A was held during initialization to allow any config to be used for an opmode.
+static ANY_CONFIG: LazyLock<Mutex<HashMap<OpModeId, bool>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 thread_local! {
     /// Currently running op mode's ID. This is really cursed.
@@ -897,6 +903,7 @@ impl Clone for FtcContext {
     fn clone(&self) -> Self {
         Self {
             this: clone_global_ref(&self.vm, &self.this),
+            cfg_mgr: clone_global_ref(&self.vm, &self.cfg_mgr),
             vm: self.vm.clone(),
             kind: self.kind,
             name: self.name,
@@ -929,9 +936,10 @@ impl FtcContext {
         kind: OpModeType,
         name: &'static str,
         source: &'static Location<'static>,
+        config: &'static HardwareConfig,
     ) -> Self {
         use android_logger::FilterBuilder;
-        
+
         android_logger::init_once(
             android_logger::Config::default()
                 .with_max_level(if cfg!(debug_assertions) {
@@ -947,6 +955,71 @@ impl FtcContext {
         );
 
         let out = Self::new_no_log(env, this, kind, name, source);
+
+        let any_config = out.gamepad1().a();
+        ANY_CONFIG.lock().insert(out.id(), any_config);
+
+        let active = out.active_config();
+
+        if active != config.id && !any_config {
+            let cfg_mgr = env.new_local_ref(&out.cfg_mgr).unwrap();
+            let id = new_string!(env env, format!("{}.xml", config.id)).unwrap();
+            let config_file = env
+                .load_class(jni_str!(
+                    "com.qualcomm.ftccommon.configuration.RobotConfigFile"
+                ))
+                .unwrap();
+
+            let cfg = env
+                .new_object(
+                    config_file,
+                    jni_sig!(
+                        "(Lcom/qualcomm/ftccommon/configuration/RobotConfigFileManager;Ljava/lang/\
+                         String;)Lcom/qualcomm/ftccommon/configuration/RobotConfigFile;"
+                    ),
+                    &[(&cfg_mgr).into(), (&id).into()],
+                )
+                .unwrap();
+
+            env.call_method(
+                &cfg_mgr,
+                jni_str!("setActiveConfig"),
+                jni_sig!("(Lcom/qualcomm/ftccommon/configuration/RobotConfigFile;)V"),
+                &[(&cfg).into()],
+            )
+            .unwrap();
+
+            let app_util = env
+                .load_class(jni_str!(
+                    "org.firstinspires.ftc.robotcore.internal.system.AppUtil"
+                ))
+                .unwrap();
+            let app_util = env
+                .call_static_method(
+                    app_util,
+                    jni_str!("getInstance"),
+                    jni_sig!("()Lorg/firstinspires/ftc/robotcore/internal/system/AppUtil;"),
+                    &[],
+                )
+                .unwrap()
+                .l()
+                .unwrap();
+
+            warn!(
+                "Restarting app to set active configuration; please wait a moment. If you want to \
+                 override this, hold A on either gamepad while initializing the opmode."
+            );
+
+            env.call_method(
+                app_util,
+                jni_str!("restartApp"),
+                jni_sig!("(I)V"),
+                &[0i32.into()],
+            )
+            .unwrap();
+
+            unreachable!(); // `restartApp` never returns normally
+        }
 
         info!("Rust FTC initalized");
 
@@ -976,8 +1049,42 @@ impl FtcContext {
             });
         }));
 
+        let manual_control_op_mode = env
+            .load_class(jni_str!(
+                "org.firstinspires.ftc.ftccommon.internal.manualcontrol.ManualControlOpMode"
+            ))
+            .unwrap();
+        let event_loop_manager = env
+            .get_static_field(
+                manual_control_op_mode,
+                jni_str!("eventLoopManager"),
+                jni_sig!("Lcom/qualcomm/robotcore/eventloop/EventLoopManager;"),
+            )
+            .unwrap()
+            .l()
+            .unwrap();
+        let event_loop = env
+            .get_field(
+                event_loop_manager,
+                jni_str!("eventLoop"),
+                jni_sig!("Lcom/qualcomm/ftccommon/FtcEventLoop;"),
+            )
+            .unwrap()
+            .l()
+            .unwrap();
+        let cfg_mgr = env
+            .get_field(
+                event_loop,
+                jni_str!("robotCfgFileMgr"),
+                jni_sig!("Lcom/qualcomm/ftccommon/configuration/RobotConfigFileManager;"),
+            )
+            .unwrap()
+            .l()
+            .unwrap();
+
         let out = Self {
             this: env.new_global_ref(this).unwrap(),
+            cfg_mgr: env.new_global_ref(cfg_mgr).unwrap(),
             vm: env.get_java_vm().unwrap(),
             kind,
             name,
@@ -1002,6 +1109,36 @@ impl FtcContext {
         out.init_thread();
         out
     }
+    /// Get the name/ID of the current active robot configuration.
+    pub fn active_config(&self) -> String {
+        Self::active_config_cfg_mgr(&self.vm, &self.cfg_mgr)
+    }
+    /// Whether the provided config is the currently running one.
+    pub fn is_running_config(&self, cfg: &'static HardwareConfig) -> bool {
+        self.active_config() == cfg.id
+    }
+    /// Whether the provided config is the currently running one.
+    fn is_running_config_cfg_mgr(vm: &JavaVM, cfg_mgr: &Global<JObject<'static>>, cfg: &'static HardwareConfig) -> bool {
+        Self::active_config_cfg_mgr(vm, cfg_mgr) == cfg.id
+    }
+    /// Get the name of the current active robot configuration.
+    fn active_config_cfg_mgr(vm: &JavaVM, cfg_mgr: &Global<JObject<'static>>) -> String {
+        vm.attach_current_thread(|env| {
+            env.call_method(
+                cfg_mgr,
+                jni_str!("getActiveConfig"),
+                jni_sig!("()Lcom/qualcomm/ftccommon/configuration/RobotConfigFile;"),
+                &[],
+            )
+            .and_then(JValueOwned::l)
+            .and_then(|v| env.get_field(v, jni_str!("name"), jni_sig!("Ljava/lang/String;")))
+            .and_then(JValueOwned::l)
+            .and_then(|v| JString::cast_local(env, v))
+            .map(|v| v.to_string())
+        })
+        .unwrap()
+    }
+
     /// Get the name of the opmode currently running.
     pub fn opmode_name(&self) -> &'static str {
         self.name
@@ -1187,6 +1324,8 @@ impl FtcContext {
         Hardware {
             vm: self.vm.clone(),
             hardware_map,
+            cfg_mgr: clone_global_ref(&self.vm, &self.cfg_mgr),
+            any_config: ANY_CONFIG.lock().get(&self.id()).copied().unwrap_or(false),
         }
     }
     /// Return the first gamepad.

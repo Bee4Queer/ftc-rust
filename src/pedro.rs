@@ -259,7 +259,7 @@ impl IntoJniObject for Pose {
     const JNI_CLASS: &'static str = "com/pedropathing/math/Pose";
     fn into_jni_object<'local>(self, env: &mut jni::Env<'local>) -> JObject<'local> {
         let class = env
-            .load_class(jni_str!("com/pedropathing/math/Pose"))
+            .load_class(jni_str!("com.pedropathing.math.Pose"))
             .unwrap();
 
         env.new_object(
@@ -322,7 +322,7 @@ impl Pedro {
             path: self
                 .vm
                 .attach_current_thread(|env| {
-                    let path_class = env.load_class(jni_str!("com/pedropathing/api/Paths"))?;
+                    let path_class = env.load_class(jni_str!("com.pedropathing.api.Paths"))?;
                     let start = start.into_jni_object(env);
                     let end = end.into_jni_object(env);
                     let path = env
@@ -352,7 +352,7 @@ impl Pedro {
             path: self
                 .vm
                 .attach_current_thread(|env| {
-                    let path_class = env.load_class(jni_str!("com/pedropathing/api/Paths"))?;
+                    let path_class = env.load_class(jni_str!("com.pedropathing.api.Paths"))?;
                     let poses = crate::jlist![env env; from poses.as_ref()];
                     let path = env
                         .call_static_method(
@@ -389,7 +389,7 @@ impl Path {
         let obj = this
             .vm
             .attach_current_thread(|env| {
-                let path_class = env.load_class(jni_str!("com/pedropathing/api/Paths"))?;
+                let path_class = env.load_class(jni_str!("com.pedropathing.api.Paths"))?;
                 let from = others
                     .as_ref()
                     .iter()
@@ -431,7 +431,8 @@ impl Path {
         Self::combine([self, other])
     }
 
-    /// Set heading interpolation to be linear from `start_heading` to `end_heading`. The provided headings are in radians.
+    /// Set heading interpolation to be linear from `start_heading` to `end_heading`. The provided
+    /// headings are in radians.
     #[doc(alias = "linear")]
     pub fn heading_linear(self, start_heading: f64, end_heading: f64) -> Path {
         let path = self
@@ -480,7 +481,8 @@ impl Path {
         }
     }
 
-    /// Set the heading to be constant throughout the entire path. The provided heading is in radians.
+    /// Set the heading to be constant throughout the entire path. The provided heading is in
+    /// radians.
     #[doc(alias = "constant")]
     pub fn heading_constant(self, heading: f64) -> Path {
         let path = self

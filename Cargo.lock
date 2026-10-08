@@ -83,6 +83,7 @@ dependencies = [
 name = "ftc-rust-proc"
 version = "11.2.0"
 dependencies = [
+ "heck",
  "proc-macro2",
  "quote",
  "syn",
@@ -93,6 +94,12 @@ name = "glam"
 version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f22fb22f065b308be0d8724e3706c7fa3fc2a6c7d6899df4cad7860e7a75436"
+
+[[package]]
+name = "heck"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "jni"

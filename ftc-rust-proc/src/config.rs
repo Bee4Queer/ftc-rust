@@ -1,5 +1,6 @@
-use std::{collections::HashSet, fmt::Write, path::PathBuf};
+use std::{collections::HashMap, fmt::Write, path::PathBuf};
 
+use heck::ToShoutySnekCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
@@ -366,7 +367,11 @@ impl Config {
                         ("LynxEmbeddedIMU", r#" port="0" bus="0""#.to_string())
                     }
                 };
-                let _ = writeln!(out, r#"            <{} name="{}"{} />"#, tag, device.name, attrs);
+                let _ = writeln!(
+                    out,
+                    r#"            <{} name="{}"{} />"#,
+                    tag, device.name, attrs
+                );
             }
         }
 
@@ -441,6 +446,8 @@ impl Parse for ConfigInputPropVal {
 
 enum ConfigInput {
     Property {
+        attrs: Vec<Attribute>,
+        vis: Visibility,
         name: Ident,
         eq: Token![=],
         contents: ConfigInputPropVal,
@@ -465,24 +472,14 @@ impl Parse for ConfigInput {
         let vis: Visibility = input.parse()?;
         let lookahead = input.lookahead1();
         if lookahead.peek(Ident) {
-            if !matches!(vis, Visibility::Inherited) {
-                return Err(Error::new_spanned(
-                    vis,
-                    "no visibility can be specified for properties",
-                ));
-            }
-            if !attrs.is_empty() {
-                return Err(Error::new_spanned(
-                    attrs.first().unwrap(),
-                    "attributes cannot be placed on properties",
-                ));
-            }
             let name = Ident::parse(input)?;
             let eq = <Token![=]>::parse(input)?;
             let contents = ConfigInputPropVal::parse(input)?;
             let semi = <Token![;]>::parse(input)?;
 
             Ok(Self::Property {
+                attrs,
+                vis,
                 name,
                 eq,
                 contents,
@@ -527,22 +524,28 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     };
     let items = parser.parse2(tokens)?;
 
-    let mut config_name: Option<LitStr> = None;
+    let mut config_name: Option<(Vec<Attribute>, Visibility, LitStr)> = None;
     let mut has_exp_hub: Option<LitBool> = None;
     let mut devices: Vec<Device> = Vec::with_capacity(items.len());
     let mut ftc: Option<Ident> = None;
 
     for item in items {
         match item {
-            ConfigInput::Property { name, contents, .. } => match name.to_string().as_str() {
+            ConfigInput::Property {
+                attrs,
+                vis,
+                name,
+                contents,
+                ..
+            } => match name.to_string().as_str() {
                 "CONFIG_NAME" => {
                     if let Some(first) = config_name {
                         let mut err = Error::new_spanned(name, "CONFIG_NAME redefined");
-                        err.combine(Error::new_spanned(first, "original declaration"));
+                        err.combine(Error::new_spanned(first.2, "original declaration"));
                         return Err(err);
                     }
                     config_name = Some(match contents {
-                        ConfigInputPropVal::String(v) => v,
+                        ConfigInputPropVal::String(v) => (attrs, vis, v),
                         _ => return Err(Error::new_spanned(contents, "expected string")),
                     });
                 }
@@ -600,16 +603,30 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     let ftc = ftc.unwrap_or_else(|| Ident::new("ftc", full_span));
 
+    let config_name = config_name.unwrap();
+
     let cfg = Config {
-        config_name: config_name.unwrap(),
+        config_name: config_name.2,
         has_exp_hub: has_exp_hub.is_some_and(|v| v.value),
         devices,
     };
 
-    let mut motors = HashSet::with_capacity(4);
-    let mut servos = HashSet::with_capacity(6);
-    let mut digitals = HashSet::with_capacity(6);
-    let mut i2cs = HashSet::with_capacity(4);
+    let cfg_name = cfg.config_name.value();
+
+    if cfg_name != cfg_name.trim()
+        || cfg_name.is_empty()
+        || cfg_name.contains(['/', '\\', '?', ':', '"', '*', '|', '<', '>'])
+    {
+        return Err(Error::new_spanned(
+            cfg.config_name,
+            "invalid config name specified",
+        ));
+    }
+
+    let mut motors = HashMap::with_capacity(4);
+    let mut servos = HashMap::with_capacity(6);
+    let mut digitals = HashMap::with_capacity(6);
+    let mut i2cs = HashMap::with_capacity(4);
     let mut has_imu = false;
 
     for device in &cfg.devices {
@@ -629,11 +646,13 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
             }
         };
 
-        if hash_set.contains(&port.0) {
-            return Err(Error::new(port.1, "this port is already used earlier"));
+        if let Some(first) = hash_set.get(&port.0) {
+            let mut err = Error::new(port.1, "this port is already used earlier");
+            err.combine(Error::new(*first, "port is used here"));
+            return Err(err);
         }
 
-        hash_set.insert(port.0);
+        hash_set.insert(port.0, port.1);
     }
 
     let xml_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
@@ -664,21 +683,37 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     std::fs::write(out_path, xml).unwrap();
 
-    let them = cfg.devices.into_iter().map(|v| {
-        let vis = v.vis;
-        let name = v.name;
+    let vis = config_name.1;
+    let attrs = config_name.0;
+    let config_name = Ident::new(
+        &cfg.config_name.value().TO_SHOUTY_SNEK_CASE(),
+        cfg.config_name.span(),
+    );
+    let actual_config_name = cfg.config_name;
+
+    let them = cfg.devices.iter().map(|v| {
+        let vis = &v.vis;
+        let name = &v.name;
         let ty = v.kind.type_name();
-        let attrs = v.attrs;
+        let attrs = &v.attrs;
         quote_spanned! {name.span()=>
-            #(
-                #attrs
-            )*
-            #[allow(unsafe_code)]
-            #vis static #name: ::#ftc::hardware::config::HardwareItem<#ty> = unsafe { ::#ftc::hardware::config::HardwareItem::new(stringify!(#name)) };
+            #(#attrs)*
+            #vis static #name: ::#ftc::hardware::config::HardwareItem<#ty> = ::#ftc::hardware::config::HardwareItem::new(stringify!(#name), &#config_name);
+        }
+    });
+
+    let them2 = cfg.devices.iter().map(|v| {
+        let name = &v.name;
+        quote_spanned! {name.span()=>
+            stringify!(#name)
         }
     });
 
     Ok(quote_spanned! {full_span=>
+        #(#attrs)*
+        #vis static #config_name: ::#ftc::hardware::config::HardwareConfig =
+            ::#ftc::hardware::config::HardwareConfig::new(#actual_config_name, &[#( #them2 ),*]);
+
         #(
             #them
         )*

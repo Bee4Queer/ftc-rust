@@ -5,6 +5,7 @@ use std::{
     any::type_name,
     fmt::{Debug, Display},
     ops::Neg,
+    sync::atomic::Ordering,
 };
 
 use glam::{DVec3, Quat, vec4};
@@ -19,13 +20,13 @@ use jni::{
 #[macro_use]
 mod devices;
 pub use devices::*;
+pub mod config;
 pub mod ext;
 pub mod limelight;
 pub mod sensors;
-pub mod config;
-use log::{error, trace};
+use log::{error, trace, warn};
 
-use crate::{call_method, enum_variant_into, get_field, new_global, new_string};
+use crate::{FtcContext, call_method, enum_variant_into, get_field, new_global, new_string};
 
 /// Easily define a basic device.
 #[macro_export]
@@ -157,15 +158,13 @@ macro_rules! device {
 }
 
 /// A device that can be made from a java object.
-///
-/// Default implementation should
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a device",
     label = "not a device",
     note = "`IntoJniObject` and `Device` are separate traits; implement `Device` if it is a \
             device, and `IntoJniObject` otherwise"
 )]
-pub trait Device: Default {
+pub trait Device {
     /// Create a new instance of this type from the java environment and the
     /// relevant object.
     #[must_use]
@@ -206,9 +205,12 @@ pub trait ExtendableDevice: Device {
 pub struct Hardware {
     /// The environment.
     pub(crate) vm: JavaVM,
-    /// The actual hardwareMap object. Should be
+    /// The actual `HardwareMap` object. Should be
     /// com/qualcomm/robotcore/hardware/HardwareMap.
     pub(crate) hardware_map: Global<JObject<'static>>,
+
+    pub(crate) cfg_mgr: Global<JObject<'static>>,
+    pub(crate) any_config: bool,
 }
 
 impl Debug for Hardware {
@@ -220,18 +222,29 @@ impl Debug for Hardware {
 impl Hardware {
     /// Get a [`Device`] from the hardware map.
     // pub fn get<T: Device>(&self, name: impl AsRef<str>) -> T {
-    pub fn get<T: Device>(&self, name: config::HardwareItem<T>) -> T {
+    pub fn get<T: Device>(&self, item: config::HardwareItem<T>) -> T {
+        if !item.cfg.ensured.load(Ordering::Relaxed) {
+            if FtcContext::is_running_config_cfg_mgr(&self.vm, &self.cfg_mgr, item.cfg) {
+                if self.any_config {
+                    warn!("using hardware item from different configuration");
+                } else {
+                    panic!("attempted to use hardware item from different configuration");
+                }
+            }
+            item.cfg.ensured.store(true, Ordering::Relaxed)
+        }
+
         trace!(
-            "getting device `{}` of type `{}`",
-            name.as_ref(),
+            "getting device `{}/{}` of type `{}`",
+            item.cfg.id,
+            item.id,
             type_name::<T>()
         );
         let object = self
             .vm
             .attach_current_thread(|env| {
                 let class = env.load_class(JNIString::new(T::JAVA_CLASS))?;
-                let jname = new_string!(env env, name.as_ref())?;
-                trace!("arguments prepared");
+                let jname = new_string!(env env, &item.id)?;
 
                 let res = env.call_method(
                     &self.hardware_map,
@@ -240,18 +253,15 @@ impl Hardware {
                     &[(&class).into(), (&jname).into()],
                 );
 
-                trace!("called method");
-
                 match res {
                     Ok(res) => new_global!(env, res.l()?),
                     Err(err) => {
-                        error!("Got error {err} trying to get device `{}`!", name.as_ref());
+                        error!("Got error {err} trying to get device `{}`!", &item.id);
                         Err(err)
                     }
                 }
             })
             .unwrap();
-        trace!("got device");
 
         T::from_java(self.vm.clone(), object)
     }
@@ -611,7 +621,7 @@ impl IntoJniObject for AngularVelocity {
         "org/firstinspires/ftc/robotcore/external/navigation/AngularVelocity";
 
     fn into_jni_object<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
-        let class = get_class(env, Self::JNI_CLASS);
+        let class = get_class(env, Self::JAVA_CLASS);
 
         let angle = self.unit.into_jni_object(env);
 
@@ -804,7 +814,7 @@ impl IntoJniObject for YawPitchRollAngles {
     fn into_jni_object<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
         debug_assert!(self.validate());
 
-        let class = get_class(env, Self::JNI_CLASS);
+        let class = get_class(env, Self::JAVA_CLASS);
 
         let angle = self.unit.into_jni_object(env);
 
@@ -973,7 +983,7 @@ impl IntoJniObject for Rev9AxisImuOrientationOnRobot {
         let logo = self.logo_dir.into_jni_object_logo(env);
         let i2c = self.i2c_dir.into_jni_object_i2c(env);
 
-        let class = get_class(env, Self::JNI_CLASS);
+        let class = get_class(env, Self::JAVA_CLASS);
 
         env.new_object(
             class,
@@ -1094,6 +1104,14 @@ pub struct HardwareDevice {
     /// The actual device object. Should implement
     /// com/qualcomm/robotcore/hardware/HardwareDevice.
     pub object: Global<JObject<'static>>,
+}
+
+impl Device for HardwareDevice {
+    const JAVA_CLASS: &'static str = "com.qualcomm.robotcore.hardware.HardwareDevice";
+    const JNI_CLASS: &'static str = "com/qualcomm/robotcore/hardware/HardwareDevice";
+    fn from_java(vm: JavaVM, object: Global<JObject<'static>>) -> Self {
+        Self { vm, object }
+    }
 }
 
 impl Clone for HardwareDevice {

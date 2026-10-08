@@ -6,7 +6,7 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote, quote_spanned};
 use syn::{
-    Error, Ident, ItemFn, LitStr, Token,
+    Error, Ident, ItemFn, LitStr, Path, Token,
     parse::{Parse, Parser},
     parse_macro_input,
     spanned::Spanned,
@@ -16,9 +16,11 @@ extern crate proc_macro;
 
 mod config;
 
+/// Programmatically generate the robot config at buildtime.
+/// 
 /// ```ignore (generates external files)
 /// config! {
-///     CONFIG_NAME = "FTC2026-7000";
+///     CONFIG_NAME = "Example config";
 ///     HAS_EXP_HUB = false;
 ///
 ///     static IMU = CTRL_HUB/EmbeddedIMU;
@@ -36,7 +38,7 @@ pub fn config(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
         .into()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum FtcArg {
     Name(String, Span),
     Group(String, Span),
@@ -48,13 +50,14 @@ enum FtcArg {
     Autonomous(Span),
     Utility(Span),
     Disabled(Span),
+    Config(Span, Path),
 }
 
 impl FtcArg {
     pub fn get_span(&self) -> Span {
         use FtcArg::{
-            Autonomous, Description, Disabled, Group, Iterative, Linear, Name, RenameCrate, Teleop,
-            Utility,
+            Autonomous, Config, Description, Disabled, Group, Iterative, Linear, Name, RenameCrate,
+            Teleop, Utility,
         };
         match self {
             Name(_, span)
@@ -66,13 +69,14 @@ impl FtcArg {
             | Autonomous(span)
             | Group(_, span)
             | Disabled(span)
-            | RenameCrate(_, span) => *span,
+            | RenameCrate(_, span)
+            | Config(span, _) => *span,
         }
     }
     pub const fn get_name(&self) -> &'static str {
         use FtcArg::{
-            Autonomous, Description, Disabled, Group, Iterative, Linear, Name, RenameCrate, Teleop,
-            Utility,
+            Autonomous, Config, Description, Disabled, Group, Iterative, Linear, Name, RenameCrate,
+            Teleop, Utility,
         };
         match self {
             Name(_, _) => "name",
@@ -85,6 +89,7 @@ impl FtcArg {
             Group(_, _) => "group",
             Disabled(_) => "disabled",
             RenameCrate(_, _) => "rename_crate",
+            Config(_, _) => "config",
         }
     }
 }
@@ -115,6 +120,16 @@ impl Parse for FtcArg {
                 "teleop" => FtcArg::Teleop(name_ident.span()),
                 "auto" => FtcArg::Autonomous(name_ident.span()),
                 "disabled" => FtcArg::Disabled(name_ident.span()),
+                "config" => {
+                    let lookahead = input.lookahead1();
+                    if lookahead.peek(Token![=]) {
+                        let _: Token![=] = input.parse()?;
+
+                        FtcArg::Config(name_ident.span(), input.parse()?)
+                    } else {
+                        return Err(lookahead.error());
+                    }
+                }
                 "rename_crate" => {
                     let lookahead = input.lookahead1();
                     if lookahead.peek(Token![=]) {
@@ -122,8 +137,8 @@ impl Parse for FtcArg {
 
                         let lookahead = input.lookahead1();
                         if lookahead.peek(Ident) {
-                            let crate_name: Ident = input.parse()?;
-                            FtcArg::RenameCrate(crate_name, name_ident.span())
+                            let value: Ident = input.parse()?;
+                            FtcArg::RenameCrate(value, name_ident.span())
                         } else {
                             return Err(lookahead.error());
                         }
@@ -311,6 +326,7 @@ pub fn ftc(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut autonomous = false;
     let mut disabled = false;
     let mut ftc = Ident::new("ftc", Span::call_site());
+    let mut config = None;
 
     for arg in args {
         match arg {
@@ -324,6 +340,7 @@ pub fn ftc(attr: TokenStream, item: TokenStream) -> TokenStream {
             FtcArg::Group(v, _) => group = Some(v),
             FtcArg::Disabled(_) => disabled = true,
             FtcArg::RenameCrate(name, _) => ftc = name,
+            FtcArg::Config(_, path) => config = Some(path),
         }
     }
 
@@ -385,6 +402,12 @@ pub fn ftc(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let Some(name) = name else {
         return Error::new(func.span(), "an op mode must have a name")
+            .into_compile_error()
+            .into();
+    };
+
+    let Some(config) = config else {
+        return Error::new(func.span(), "an op mode must have a config set")
             .into_compile_error()
             .into();
     };
@@ -546,6 +569,7 @@ public class {class_name} extends {2} {{
                             ::#ftc::OpModeType::#kind,
                             stringify!(#class_name),
                             #location,
+                            &#config,
                         );
 
                         #disabled_code
@@ -611,6 +635,7 @@ public class {class_name} extends {2} {{
                             ::#ftc::OpModeType::#kind,
                             stringify!(#class_name),
                             #location,
+                            &#config,
                         );
 
                         #disabled_code
