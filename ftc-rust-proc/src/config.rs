@@ -683,10 +683,30 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     std::fs::write(out_path, xml).unwrap();
 
+    let shouty_config_name = cfg.config_name.value().TO_SHOUTY_SNEK_CASE();
+
+    let mut is_valid_xid = unicode_ident::is_xid_start(shouty_config_name.chars().next().unwrap());
+
+    if is_valid_xid {
+        for ch in shouty_config_name.chars().skip(1) {
+            is_valid_xid = unicode_ident::is_xid_continue(ch);
+            if !is_valid_xid {
+                break;
+            }
+        }
+    }
+
+    if !is_valid_xid {
+        return Err(Error::new_spanned(
+            cfg.config_name,
+            "config name cannot be converted to valid rust identifier",
+        ));
+    }
+
     let vis = config_name.1;
     let attrs = config_name.0;
     let config_name = Ident::new(
-        &cfg.config_name.value().TO_SHOUTY_SNEK_CASE(),
+        &shouty_config_name,
         cfg.config_name.span(),
     );
     let actual_config_name = cfg.config_name;
