@@ -779,7 +779,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     });
 
     let them4 = props.iter().map(|v| {
-        quote_spanned! {v.span()=> 
+        quote! {
             let _ = ::#ftc::hardware::config::device_docs:: #v;
         }
     });
