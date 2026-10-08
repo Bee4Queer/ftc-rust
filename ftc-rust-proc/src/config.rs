@@ -659,9 +659,9 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     let mut has_imu = None;
 
     for device in &cfg.devices {
-        if device.hub == Hub::ExpansionHub && !cfg.has_exp_hub {
-            return Err(Error::new_spanned(
-                device.name,
+        if let Hub::ExpansionHub(span) = device.hub && !cfg.has_exp_hub {
+            return Err(Error::new(
+                span,
                 "cannot use expansion hub in config with expansion hub disabled",
             ));
         }
