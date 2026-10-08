@@ -98,3 +98,53 @@ impl<T: Device> Display for HardwareItem<T> {
         write!(f, "hardware item {} @ config {}", self.id, self.cfg.id)
     }
 }
+
+#[doc(hidden)]
+#[cfg(feature = "proc-macro")]
+#[allow(non_snake_case, missing_debug_implementations)]
+pub mod device_docs {
+    /// A DC motor.
+    pub mod Motor {
+        /// Generic DC motor. The PID controller for speed will not be very accurate.
+        pub struct Generic;
+
+        /// 3.7:1 reduction gearmotor.
+        pub struct NeveRest37v1Gear;
+        /// NeveRest classic 20 motor. Appears to no longer be produced, I can't find information on
+        /// it.
+        pub struct NeveRest20Gear;
+        /// NeveRest classic 40 motor. 40:1 reduction gearmotor.
+        pub struct NeveRest40Gear;
+        /// NeveRest classic 60 motor. 60:1 reduction gearmotor.
+        pub struct NeveRest60Gear;
+
+        /// Discontinued 20:1 spur gearbox hex motor.
+        pub struct RevRobotics20HDHex;
+        /// 40:1 spur gearbox hex motor.
+        pub struct RevRobotics40HDHex;
+        /// Rev robotics' core hex motor.
+        pub struct RevRoboticsCoreHex;
+
+        /// 53:1 ratio spur gear motor.
+        pub struct GoBilda5201;
+        /// 6mm D, 24mm length shaft planetary motor.
+        pub struct GoBilda5202;
+        /// 8mm REX, 24mm length shaft planetary motor. Same as the GoBilda5202 in the FTC SDK.
+        pub type GoBilda5203 = GoBilda5202;
+        /// 8mm REX, 80mm length shaft planetary motor. Same as the GoBilda5202 in the FTC SDK.
+        pub type GoBilda5204 = GoBilda5202;
+
+        /// I can't find any information on this motor online, other then the part number W39530.
+        pub struct Tetrix;
+    }
+
+    /// A servo motor. For continuous servos, look at [`CRServo`].
+    pub struct Servo;
+    /// A continuous servo motor that doesn't have defined stops.
+    pub struct CRServo;
+    /// The REV spark mini motor controller. Shows up as a [`DcMotorSimple`](crate::hardware::DcMotorSimple) in code.
+    pub struct RevSPARKMini;
+
+    /// The IMU embedded in the control hub. Cannot be used under an expansion hub.
+    pub struct EmbeddedIMU;
+}

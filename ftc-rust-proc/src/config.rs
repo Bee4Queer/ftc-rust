@@ -31,9 +31,9 @@ impl Parse for Hub {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 enum MotorKind {
-    Generic,
+    Generic(Token![.], Span),
 
     NeveRest37v1Gear(Token![.], Span),
     NeveRest20Gear(Token![.], Span),
@@ -46,20 +46,18 @@ enum MotorKind {
 
     GoBilda5201(Token![.], Span),
     /// Includes 5202/5203/5204 series motors.
-    GoBilda5202(Token![.], Span),
+    GoBilda5202(Token![.], Ident),
 
     Tetrix(Token![.], Span),
 }
 
 impl Parse for MotorKind {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        if !input.peek(Token![.]) {
-            return Ok(Self::Generic);
-        }
         let dot = input.parse()?;
         let name: Ident = input.parse()?;
 
         match name.to_string().as_str() {
+            "Generic" => Ok(Self::Generic(dot, name.span())),
             "NeveRest37v1Gear" => Ok(Self::NeveRest37v1Gear(dot, name.span())),
             "NeveRest20Gear" => Ok(Self::NeveRest20Gear(dot, name.span())),
             "NeveRest40Gear" => Ok(Self::NeveRest40Gear(dot, name.span())),
@@ -71,7 +69,7 @@ impl Parse for MotorKind {
 
             "GoBilda5201" => Ok(Self::GoBilda5201(dot, name.span())),
             "GoBilda5202" | "GoBilda5203" | "GoBilda5204" => {
-                Ok(Self::GoBilda5202(dot, name.span()))
+                Ok(Self::GoBilda5202(dot, name))
             }
 
             "Tetrix" => Ok(Self::Tetrix(dot, name.span())),
@@ -138,7 +136,7 @@ impl Parse for I2CKind {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 enum DeviceKind {
     Motor {
         motor: Span,
@@ -305,7 +303,7 @@ impl Config {
 
         fn output_devices(out: &mut String, devices: Vec<&Device>) {
             for device in devices {
-                let (tag, attrs) = match device.kind {
+                let (tag, attrs) = match &device.kind {
                     DeviceKind::Motor {
                         motor: _,
                         kind,
@@ -313,7 +311,7 @@ impl Config {
                         port: (port, _),
                     } => (
                         match kind {
-                            MotorKind::Generic => "Motor",
+                            MotorKind::Generic(_, _) => "Motor",
                             MotorKind::NeveRest37v1Gear(_, _) => "NeveRest3.7v1Gear",
                             MotorKind::NeveRest20Gear(_, _) => "NeveRest20Gear",
                             MotorKind::NeveRest40Gear(_, _) => "NeveRest40Gear",
@@ -361,7 +359,7 @@ impl Config {
                             I2CKind::RevColorSensorV3(_, _) => "RevColorSensorV3",
                             I2CKind::RevBlinkinLedDriver(_, _) => "RevBlinkinLedDriver",
                         },
-                        format!(r#" port="{}" bus="{bus}""#, u8::from(bus == 0)),
+                        format!(r#" port="{}" bus="{bus}""#, u8::from(*bus == 0)),
                     ),
                     DeviceKind::EmbeddedIMU(_) => {
                         ("LynxEmbeddedIMU", r#" port="0" bus="0""#.to_string())
@@ -627,7 +625,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     let mut servos = HashMap::with_capacity(6);
     let mut digitals = HashMap::with_capacity(6);
     let mut i2cs = HashMap::with_capacity(4);
-    let mut has_imu = false;
+    let mut has_imu = None;
 
     for device in &cfg.devices {
         let (hash_set, port) = match device.kind {
@@ -638,10 +636,15 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
             }
             DeviceKind::I2C { bus, .. } => (&mut i2cs, bus),
             DeviceKind::EmbeddedIMU(span) => {
-                if has_imu {
-                    return Err(Error::new(span, "embedded IMU is already defined earlier"));
+                if let Some(first) = has_imu {
+                    let mut err = Error::new(span, "embedded IMU is already defined earlier");
+                    err.combine(Error::new(first, "IMU is defined here"));
+                    return Err(err);
                 }
-                has_imu = true;
+                has_imu = Some(span);
+                if !matches!(device.hub, Hub::ControlHub(_)) {
+                    return Err(Error::new(span, "embedded IMU can only be defined under control hub"));
+                }
                 continue;
             }
         };
@@ -705,10 +708,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     let vis = config_name.1;
     let attrs = config_name.0;
-    let config_name = Ident::new(
-        &shouty_config_name,
-        cfg.config_name.span(),
-    );
+    let config_name = Ident::new(&shouty_config_name, cfg.config_name.span());
     let actual_config_name = cfg.config_name;
 
     let them = cfg.devices.iter().map(|v| {
@@ -729,6 +729,41 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         }
     });
 
+    let them3 = cfg.devices.iter().map(|v| {
+        let name = &v.name;
+        let motor = match &v.kind {
+            DeviceKind::Motor { motor, .. } => Some(quote_spanned! {*motor=> Motor:: }),
+            _ => None,
+        };
+        let kind = match &v.kind {
+            DeviceKind::Motor { kind, .. } => match kind {
+                MotorKind::Generic(_, span) => quote_spanned!{*span=> Generic},
+                MotorKind::NeveRest37v1Gear(_, span) => quote_spanned!{*span=> GeneNeveRest37v1Gearric},
+                MotorKind::NeveRest20Gear(_, span) => quote_spanned!{*span=> NeveRest20Gear},
+                MotorKind::NeveRest40Gear(_, span) => quote_spanned!{*span=> NeveRest40Gear},
+                MotorKind::NeveRest60Gear(_, span) => quote_spanned!{*span=> NeveRest60Gear},
+                MotorKind::RevRobotics20HDHex(_, span) => quote_spanned!{*span=> RevRobotics20HDHex},
+                MotorKind::RevRobotics40HDHex(_, span) => quote_spanned!{*span=> RevRobotics40HDHex},
+                MotorKind::RevRoboticsCoreHex(_, span) => quote_spanned!{*span=> RevRoboticsCoreHex},
+                MotorKind::GoBilda5201(_, span) => quote_spanned!{*span=> GoBilda5201},
+                MotorKind::GoBilda5202(_, name) => name.to_token_stream(),
+                MotorKind::Tetrix(_, span) => quote_spanned!{*span=> Tetrix},
+            },
+            DeviceKind::Servo { kind, .. } => match kind {
+                ServoKind::Servo(span) => quote_spanned!{*span=> Servo},
+                ServoKind::CRServo(span) => quote_spanned!{*span=> CRServo},
+                ServoKind::RevSPARKMini(span) => quote_spanned!{*span=> RevSPARKMini},
+            },
+            DeviceKind::DigitalDevice { .. } => todo!(),
+            DeviceKind::RevTouchSensor { .. } => todo!(),
+            DeviceKind::I2C { .. } => todo!(),
+            DeviceKind::EmbeddedIMU(span) => quote_spanned! {*span=> EmbeddedIMU},
+        };
+        quote_spanned! {name.span()=>
+            let _ = ::#ftc::hardware::config::device_docs::#(#motor)? #kind;
+        }
+    });
+
     Ok(quote_spanned! {full_span=>
         #(#attrs)*
         #vis static #config_name: ::#ftc::hardware::config::HardwareConfig =
@@ -737,5 +772,10 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         #(
             #them
         )*
+
+        const _: () = {
+            // documentation stuff
+            #( #them3 )*
+        };
     })
 }
