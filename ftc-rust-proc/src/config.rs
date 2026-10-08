@@ -760,7 +760,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
             DeviceKind::EmbeddedIMU(span) => quote_spanned! {*span=> EmbeddedIMU},
         };
         quote_spanned! {name.span()=>
-            let _ = ::#ftc::hardware::config::device_docs::#(#motor)? #kind;
+            let _ = ::#ftc::hardware::config::device_docs:: #motor #kind;
         }
     });
 
