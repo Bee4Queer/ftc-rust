@@ -722,7 +722,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         let name = &v.name;
         let ty = v.kind.type_name();
         let attrs = &v.attrs;
-        quote_spanned! {name.span()=>
+        quote! {
             #(#attrs)*
             #vis static #name: ::#ftc::hardware::config::HardwareItem<#ty> = ::#ftc::hardware::config::HardwareItem::new(stringify!(#name), &#config_name);
         }
@@ -730,7 +730,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     let them2 = cfg.devices.iter().map(|v| {
         let name = &v.name;
-        quote_spanned! {name.span()=>
+        quote! {
             stringify!(#name)
         }
     });
@@ -773,7 +773,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
             DeviceKind::I2C { .. } => todo!(),
             DeviceKind::EmbeddedIMU(span) => quote_spanned! {*span=> EmbeddedIMU},
         };
-        quote_spanned! {name.span()=>
+        quote! {
             let _: ::#ftc::hardware::config::device_docs:: #motor #kind;
         }
     });
