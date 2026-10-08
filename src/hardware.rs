@@ -164,7 +164,7 @@ macro_rules! device {
     note = "`IntoJniObject` and `Device` are separate traits; implement `Device` if it is a \
             device, and `IntoJniObject` otherwise"
 )]
-pub trait Device {
+pub trait Device: Clone {
     /// Create a new instance of this type from the java environment and the
     /// relevant object.
     #[must_use]
@@ -223,6 +223,9 @@ impl Hardware {
     /// Get a [`Device`] from the hardware map.
     // pub fn get<T: Device>(&self, name: impl AsRef<str>) -> T {
     pub fn get<T: Device>(&self, item: config::HardwareItem<T>) -> T {
+        if let Some(cached) = item.cached.read().clone() {
+            return cached;
+        }
         if !item.cfg.ensured.load(Ordering::Relaxed) {
             if FtcContext::is_running_config_cfg_mgr(&self.vm, &self.cfg_mgr, item.cfg) {
                 if self.any_config {
@@ -263,7 +266,11 @@ impl Hardware {
             })
             .unwrap();
 
-        T::from_java(self.vm.clone(), object)
+        let out = T::from_java(self.vm.clone(), object);
+        
+        *item.cached.write() = Some(out.clone());
+
+        out
     }
 }
 

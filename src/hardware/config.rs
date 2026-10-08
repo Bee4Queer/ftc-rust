@@ -9,6 +9,7 @@ use std::{
 
 #[cfg(feature = "proc-macro")]
 pub use ftc_rust_proc::config;
+use parking_lot::RwLock;
 
 use crate::hardware::Device;
 
@@ -49,15 +50,20 @@ impl HardwareConfig {
 pub struct HardwareItem<T: Device> {
     pub(crate) id: &'static str,
     pub(crate) cfg: &'static HardwareConfig,
+    pub(crate) cached: RwLock<Option<T>>,
     phantom: PhantomData<T>,
 }
 
 impl<T: Device> Clone for HardwareItem<T> {
     fn clone(&self) -> Self {
-        *self
+        Self {
+            id: self.id,
+            cfg: self.cfg,
+            cached: RwLock::new(self.cached.read().clone()),
+            phantom: PhantomData,
+        }
     }
 }
-impl<T: Device> Copy for HardwareItem<T> {}
 
 impl<T: Device> PartialEq for HardwareItem<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -82,6 +88,7 @@ impl<T: Device> HardwareItem<T> {
         Self {
             id,
             cfg,
+            cached: RwLock::new(None),
             phantom: PhantomData,
         }
     }
