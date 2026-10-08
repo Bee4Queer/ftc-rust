@@ -956,7 +956,7 @@ impl FtcContext {
 
         let out = Self::new_no_log(env, this, kind, name, source);
 
-        let any_config = out.gamepad1().a();
+        let any_config = out.gamepad1().a() || out.gamepad2().a();
         ANY_CONFIG.lock().insert(out.id(), any_config);
 
         let active = out.active_config();
@@ -1007,7 +1007,8 @@ impl FtcContext {
 
             warn!(
                 "Restarting app to set active configuration; please wait a moment. If you want to \
-                 override this, hold A on either gamepad while initializing the opmode."
+                 override this, hold A on either gamepad (make sure to press Start+A/Start+B \
+                 first!) while initializing the opmode."
             );
 
             env.call_method(
@@ -1118,7 +1119,11 @@ impl FtcContext {
         self.active_config() == cfg.id
     }
     /// Whether the provided config is the currently running one.
-    fn is_running_config_cfg_mgr(vm: &JavaVM, cfg_mgr: &Global<JObject<'static>>, cfg: &'static HardwareConfig) -> bool {
+    fn is_running_config_cfg_mgr(
+        vm: &JavaVM,
+        cfg_mgr: &Global<JObject<'static>>,
+        cfg: &'static HardwareConfig,
+    ) -> bool {
         Self::active_config_cfg_mgr(vm, cfg_mgr) == cfg.id
     }
     /// Get the name of the current active robot configuration.

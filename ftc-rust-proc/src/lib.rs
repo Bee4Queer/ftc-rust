@@ -17,7 +17,7 @@ extern crate proc_macro;
 mod config;
 
 /// Programmatically generate the robot config at buildtime.
-/// 
+///
 /// ```ignore (generates external files)
 /// config! {
 ///     CONFIG_NAME = "Example config";
