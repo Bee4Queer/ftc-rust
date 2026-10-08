@@ -648,7 +648,6 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     if cfg_name != cfg_name.trim()
         || cfg_name.is_empty()
         || cfg_name
-            .to_snek_case()
             .chars()
             .any(|v| !"0123456789abcdefghijklmnopqrstuvwxyz_".contains(v))
     {
@@ -725,7 +724,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     let xml = cfg.to_xml();
 
-    let out_path = xml_dir.join(format!("{}.xml", cfg.config_name.value().to_snek_case()));
+    let out_path = xml_dir.join(format!("{}.xml", cfg.config_name.value()));
 
     if out_path.exists() {
         let contents = std::fs::read_to_string(&out_path).unwrap();
