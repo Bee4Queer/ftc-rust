@@ -33,8 +33,7 @@ use parking_lot::{Mutex, MutexGuard};
 pub use pastey;
 
 use crate::{
-    command::{Command, SCHEDULER},
-    hardware::{Hardware, IntoJniObject, config::HardwareConfig},
+    command::{Command, SCHEDULER, SubsystemMap}, hardware::{Hardware, IntoJniObject, config::HardwareConfig},
 };
 
 /// Commonly used items.
@@ -300,7 +299,7 @@ impl<F: FnMut(&FtcContext, PressEdge) + 'static + Send + Sync> Command for Butto
             self.gamepad, self.button, self.edge,
         )
     }
-    fn execute(&mut self, ctx: &FtcContext) {
+    fn execute(&mut self, ctx: &FtcContext, _: &mut SubsystemMap) {
         let gamepad = match self.gamepad {
             WhichGamepad::Gamepad1 => ctx.gamepad1(),
             WhichGamepad::Gamepad2 => ctx.gamepad2(),
@@ -347,7 +346,7 @@ impl<F: FnMut(&FtcContext, f64) + 'static + Send + Sync> Command for StickComman
             self.threshold,
         )
     }
-    fn execute(&mut self, ctx: &FtcContext) {
+    fn execute(&mut self, ctx: &FtcContext, _: &mut SubsystemMap) {
         let gamepad = match self.gamepad {
             WhichGamepad::Gamepad1 => ctx.gamepad1(),
             WhichGamepad::Gamepad2 => ctx.gamepad2(),
@@ -1041,9 +1040,37 @@ impl FtcContext {
         source: &'static Location<'static>,
     ) -> Self {
         std::panic::set_hook(Box::new(|info| {
+            let mut backtrace = String::new();
+
+            for (i, frame) in backtrace::Backtrace::new().frames().iter().enumerate() {
+                backtrace.push_str(&format!(
+                    " {i}: {}\n",
+                    frame
+                        .symbols()
+                        .iter()
+                        .map(|v| format!(
+                            "{}: {}:{}:{}",
+                            v.name()
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("<unknown symbol>"),
+                            v.filename()
+                                .map(|v| v.to_string_lossy())
+                                .unwrap_or("<unknown file>".into()),
+                            v.lineno()
+                                .map(|v| v.to_string())
+                                .unwrap_or("<unknown line>".to_string()),
+                            v.colno()
+                                .map(|v| v.to_string())
+                                .unwrap_or("<unknown column>".to_string())
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+
             CURRENT_PANIC_TEXT.with(|v| {
                 *v.lock() = Some(PanicText {
-                    backtrace: std::backtrace::Backtrace::force_capture().to_string(),
+                    backtrace,
                     with_location: info.to_string(),
                     message: info.payload_as_str().unwrap().to_string(),
                 })

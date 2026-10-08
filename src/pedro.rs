@@ -8,10 +8,7 @@ use jni::{
 };
 
 use crate::{
-    FtcContext, clone_global_ref,
-    command::{Command, CommandHandle},
-    enum_variant_into,
-    hardware::IntoJniObject,
+    FtcContext, clone_global_ref, command::{Command, CommandHandle, SubsystemMap}, enum_variant_into, hardware::IntoJniObject,
 };
 
 /// The main Pedro Pathing struct. Needed to encapsulate a bunch of quirks of Pedro.
@@ -540,7 +537,7 @@ struct FollowPathCommand {
 }
 
 impl Command for FollowPathCommand {
-    fn init(&mut self, ctx: &FtcContext) {
+    fn init(&mut self, ctx: &FtcContext, _: &mut SubsystemMap) {
         ctx.vm
             .attach_current_thread(|env| {
                 let path = env.new_local_ref(&self.path.path)?;
@@ -554,7 +551,7 @@ impl Command for FollowPathCommand {
             })
             .unwrap();
     }
-    fn is_finished(&mut self, ctx: &FtcContext) -> bool {
+    fn is_finished(&mut self, ctx: &FtcContext, _: &mut SubsystemMap) -> bool {
         ctx.vm
             .attach_current_thread(|env| {
                 env.call_method(
@@ -575,7 +572,7 @@ struct HoldPoseCommand {
 }
 
 impl Command for HoldPoseCommand {
-    fn init(&mut self, ctx: &FtcContext) {
+    fn init(&mut self, ctx: &FtcContext, _: &mut SubsystemMap) {
         ctx.vm
             .attach_current_thread(|env| {
                 let pose = self.pose.into_jni_object(env);
@@ -589,7 +586,7 @@ impl Command for HoldPoseCommand {
             })
             .unwrap();
     }
-    fn is_finished(&mut self, _ctx: &FtcContext) -> bool {
+    fn is_finished(&mut self, _ctx: &FtcContext, _: &mut SubsystemMap) -> bool {
         self.pedro.mode() != Mode::Hold
     }
 }
