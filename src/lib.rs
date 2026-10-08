@@ -1095,7 +1095,7 @@ impl FtcContext {
             .get_field(
                 event_loop_manager,
                 jni_str!("eventLoop"),
-                jni_sig!("Lcom/qualcomm/ftccommon/FtcEventLoop;"),
+                jni_sig!("Lcom/qualcomm/robotcore/eventloop/EventLoop;"),
             )
             .unwrap()
             .l()
