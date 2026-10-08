@@ -942,14 +942,14 @@ impl FtcContext {
 
         android_logger::init_once(
             android_logger::Config::default().with_filter(
-                FilterBuilder::new()
+                dbg!(FilterBuilder::new()
                     .filter_level(if cfg!(debug_assertions) {
                         log::LevelFilter::Trace
                     } else {
                         log::LevelFilter::Info
                     })
-                    .filter(Some("jni::vm::java_vm"), log::LevelFilter::Warn)
-                    .build(),
+                    .filter_module("jni::vm::java_vm", log::LevelFilter::Warn)
+                    .build()),
             ),
         );
 
@@ -961,6 +961,7 @@ impl FtcContext {
         let active = out.active_config();
 
         if active != config.id && !any_config {
+            info!("active `{active}`, chosen `{}`", config.id);
             let cfg_mgr = env.new_local_ref(&out.cfg_mgr).unwrap();
             let id = new_string!(env env, format!("{}.xml", config.id)).unwrap();
             let config_file = env
