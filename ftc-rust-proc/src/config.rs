@@ -68,9 +68,7 @@ impl Parse for MotorKind {
             "RevRoboticsCoreHex" => Ok(Self::RevRoboticsCoreHex(dot, name.span())),
 
             "GoBilda5201" => Ok(Self::GoBilda5201(dot, name.span())),
-            "GoBilda5202" | "GoBilda5203" | "GoBilda5204" => {
-                Ok(Self::GoBilda5202(dot, name))
-            }
+            "GoBilda5202" | "GoBilda5203" | "GoBilda5204" => Ok(Self::GoBilda5202(dot, name)),
 
             "Tetrix" => Ok(Self::Tetrix(dot, name.span())),
 
@@ -527,6 +525,8 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     let mut devices: Vec<Device> = Vec::with_capacity(items.len());
     let mut ftc: Option<Ident> = None;
 
+    let mut props = Vec::new();
+
     for item in items {
         match item {
             ConfigInput::Property {
@@ -535,47 +535,50 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
                 name,
                 contents,
                 ..
-            } => match name.to_string().as_str() {
-                "CONFIG_NAME" => {
-                    if let Some(first) = config_name {
-                        let mut err = Error::new_spanned(name, "CONFIG_NAME redefined");
-                        err.combine(Error::new_spanned(first.2, "original declaration"));
-                        return Err(err);
+            } => {
+                match name.to_string().as_str() {
+                    "CONFIG_NAME" => {
+                        if let Some(first) = config_name {
+                            let mut err = Error::new_spanned(name, "CONFIG_NAME redefined");
+                            err.combine(Error::new_spanned(first.2, "original declaration"));
+                            return Err(err);
+                        }
+                        config_name = Some(match contents {
+                            ConfigInputPropVal::String(v) => (attrs, vis, v),
+                            _ => return Err(Error::new_spanned(contents, "expected string")),
+                        });
                     }
-                    config_name = Some(match contents {
-                        ConfigInputPropVal::String(v) => (attrs, vis, v),
-                        _ => return Err(Error::new_spanned(contents, "expected string")),
-                    });
-                }
-                "HAS_EXP_HUB" => {
-                    if let Some(first) = has_exp_hub {
-                        let mut err = Error::new_spanned(name, "HAS_EXP_HUB redefined");
-                        err.combine(Error::new_spanned(first, "original declaration"));
-                        return Err(err);
+                    "HAS_EXP_HUB" => {
+                        if let Some(first) = has_exp_hub {
+                            let mut err = Error::new_spanned(name, "HAS_EXP_HUB redefined");
+                            err.combine(Error::new_spanned(first, "original declaration"));
+                            return Err(err);
+                        }
+                        has_exp_hub = Some(match contents {
+                            ConfigInputPropVal::Bool(v) => v,
+                            _ => return Err(Error::new_spanned(contents, "expected bool")),
+                        });
                     }
-                    has_exp_hub = Some(match contents {
-                        ConfigInputPropVal::Bool(v) => v,
-                        _ => return Err(Error::new_spanned(contents, "expected bool")),
-                    });
-                }
-                "FTC_NAME" => {
-                    if let Some(first) = ftc {
-                        let mut err = Error::new_spanned(name, "FTC_NAME redefined");
-                        err.combine(Error::new_spanned(first, "original declaration"));
-                        return Err(err);
+                    "FTC_NAME" => {
+                        if let Some(first) = ftc {
+                            let mut err = Error::new_spanned(name, "FTC_NAME redefined");
+                            err.combine(Error::new_spanned(first, "original declaration"));
+                            return Err(err);
+                        }
+                        ftc = Some(match contents {
+                            ConfigInputPropVal::Ident(v) => v,
+                            _ => return Err(Error::new_spanned(contents, "expected ident")),
+                        });
                     }
-                    ftc = Some(match contents {
-                        ConfigInputPropVal::Ident(v) => v,
-                        _ => return Err(Error::new_spanned(contents, "expected ident")),
-                    });
+                    _ => {
+                        return Err(Error::new_spanned(
+                            name,
+                            "expected a valid property (one of CONFIG_NAME, HAS_EXP_HUB, FTC_NAME)",
+                        ));
+                    }
                 }
-                _ => {
-                    return Err(Error::new_spanned(
-                        name,
-                        "expected a valid property (one of CONFIG_NAME, HAS_EXP_HUB, FTC_NAME)",
-                    ));
-                }
-            },
+                props.push(name);
+            }
             ConfigInput::Device {
                 attrs,
                 vis,
@@ -643,7 +646,10 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
                 }
                 has_imu = Some(span);
                 if !matches!(device.hub, Hub::ControlHub(_)) {
-                    return Err(Error::new(span, "embedded IMU can only be defined under control hub"));
+                    return Err(Error::new(
+                        span,
+                        "embedded IMU can only be defined under control hub",
+                    ));
                 }
                 continue;
             }
@@ -737,22 +743,30 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         };
         let kind = match &v.kind {
             DeviceKind::Motor { kind, .. } => match kind {
-                MotorKind::Generic(_, span) => quote_spanned!{*span=> Generic},
-                MotorKind::NeveRest37v1Gear(_, span) => quote_spanned!{*span=> GeneNeveRest37v1Gearric},
-                MotorKind::NeveRest20Gear(_, span) => quote_spanned!{*span=> NeveRest20Gear},
-                MotorKind::NeveRest40Gear(_, span) => quote_spanned!{*span=> NeveRest40Gear},
-                MotorKind::NeveRest60Gear(_, span) => quote_spanned!{*span=> NeveRest60Gear},
-                MotorKind::RevRobotics20HDHex(_, span) => quote_spanned!{*span=> RevRobotics20HDHex},
-                MotorKind::RevRobotics40HDHex(_, span) => quote_spanned!{*span=> RevRobotics40HDHex},
-                MotorKind::RevRoboticsCoreHex(_, span) => quote_spanned!{*span=> RevRoboticsCoreHex},
-                MotorKind::GoBilda5201(_, span) => quote_spanned!{*span=> GoBilda5201},
+                MotorKind::Generic(_, span) => quote_spanned! {*span=> Generic},
+                MotorKind::NeveRest37v1Gear(_, span) => {
+                    quote_spanned! {*span=> GeneNeveRest37v1Gearric}
+                }
+                MotorKind::NeveRest20Gear(_, span) => quote_spanned! {*span=> NeveRest20Gear},
+                MotorKind::NeveRest40Gear(_, span) => quote_spanned! {*span=> NeveRest40Gear},
+                MotorKind::NeveRest60Gear(_, span) => quote_spanned! {*span=> NeveRest60Gear},
+                MotorKind::RevRobotics20HDHex(_, span) => {
+                    quote_spanned! {*span=> RevRobotics20HDHex}
+                }
+                MotorKind::RevRobotics40HDHex(_, span) => {
+                    quote_spanned! {*span=> RevRobotics40HDHex}
+                }
+                MotorKind::RevRoboticsCoreHex(_, span) => {
+                    quote_spanned! {*span=> RevRoboticsCoreHex}
+                }
+                MotorKind::GoBilda5201(_, span) => quote_spanned! {*span=> GoBilda5201},
                 MotorKind::GoBilda5202(_, name) => name.to_token_stream(),
-                MotorKind::Tetrix(_, span) => quote_spanned!{*span=> Tetrix},
+                MotorKind::Tetrix(_, span) => quote_spanned! {*span=> Tetrix},
             },
             DeviceKind::Servo { kind, .. } => match kind {
-                ServoKind::Servo(span) => quote_spanned!{*span=> Servo},
-                ServoKind::CRServo(span) => quote_spanned!{*span=> CRServo},
-                ServoKind::RevSPARKMini(span) => quote_spanned!{*span=> RevSPARKMini},
+                ServoKind::Servo(span) => quote_spanned! {*span=> Servo},
+                ServoKind::CRServo(span) => quote_spanned! {*span=> CRServo},
+                ServoKind::RevSPARKMini(span) => quote_spanned! {*span=> RevSPARKMini},
             },
             DeviceKind::DigitalDevice { .. } => todo!(),
             DeviceKind::RevTouchSensor { .. } => todo!(),
@@ -761,6 +775,12 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         };
         quote_spanned! {name.span()=>
             let _: ::#ftc::hardware::config::device_docs:: #motor #kind;
+        }
+    });
+
+    let them4 = props.iter().map(|v| {
+        quote_spanned! {v.span()=> 
+            let _ = ::#ftc::hardware::config::device_docs:: #v;
         }
     });
 
@@ -776,6 +796,8 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         const _: () = {
             // documentation stuff
             #( #them3 )*
+
+            #( #them4 )*
         };
     })
 }

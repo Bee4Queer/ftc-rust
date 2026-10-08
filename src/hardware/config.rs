@@ -147,4 +147,16 @@ pub mod device_docs {
 
     /// The IMU embedded in the control hub. Cannot be used under an expansion hub.
     pub struct EmbeddedIMU;
+
+    /// The control hub.
+    pub static CTRL_HUB: () = ();
+    /// The expansion hub.
+    pub static EXP_HUB: () = ();
+
+    /// The name of the configuration.
+    pub static CONFIG_NAME: &str = "";
+    /// The name of the FTC crate.
+    pub static FTC_NAME: &str = "";
+    /// Whether an expansion hub exists in this configuration.
+    pub static HAS_EXP_HUB: bool = false;
 }
