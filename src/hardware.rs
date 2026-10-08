@@ -222,7 +222,7 @@ impl Debug for Hardware {
 impl Hardware {
     /// Get a [`Device`] from the hardware map.
     // pub fn get<T: Device>(&self, name: impl AsRef<str>) -> T {
-    pub fn get<T: Device>(&self, item: config::HardwareItem<T>) -> T {
+    pub fn get<T: Device>(&self, item: &config::HardwareItem<T>) -> T {
         if let Some(cached) = item.cached.read().clone() {
             return cached;
         }

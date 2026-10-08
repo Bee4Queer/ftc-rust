@@ -769,7 +769,11 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         let attrs = &v.attrs;
         quote! {
             #(#attrs)*
-            #vis static #name: ::#ftc::hardware::config::HardwareItem<#ty> = ::#ftc::hardware::config::HardwareItem::new(stringify!(#name), &#config_name);
+            #vis static #name: &::#ftc::hardware::config::HardwareItem<#ty> = {
+                static INNER: ::#ftc::hardware::config::HardwareItem<#ty> =
+                    ::#ftc::hardware::config::HardwareItem::new(stringify!(#name), &#config_name);
+                &INNER
+            };
         }
     });
 
