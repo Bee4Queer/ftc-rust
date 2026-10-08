@@ -954,7 +954,7 @@ impl FtcContext {
                         } else {
                             log::LevelFilter::Info
                         })
-                        .filter_module("jni::vm::java_vm", log::LevelFilter::Warn)
+                        .filter_module("jni", log::LevelFilter::Warn)
                         .build(),
                 ),
         );
@@ -967,7 +967,6 @@ impl FtcContext {
         let active = out.active_config();
 
         if active != config.id && !any_config {
-            info!("active `{active}`, chosen `{}`", config.id);
             let cfg_mgr = env.new_local_ref(&out.cfg_mgr).unwrap();
             let id = new_string!(env env, format!("{}.xml", config.id)).unwrap();
             let config_file = env
@@ -1158,7 +1157,9 @@ impl FtcContext {
         cfg_mgr: &Global<JObject<'static>>,
         cfg: &'static HardwareConfig,
     ) -> bool {
-        Self::active_config_cfg_mgr(vm, cfg_mgr) == cfg.id
+        let active = Self::active_config_cfg_mgr(vm, cfg_mgr);
+        info!("active `{active}`, chosen `{}`", cfg.id);
+        active == cfg.id
     }
     /// Get the name of the current active robot configuration.
     fn active_config_cfg_mgr(vm: &JavaVM, cfg_mgr: &Global<JObject<'static>>) -> String {
