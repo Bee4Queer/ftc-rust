@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Write, net::Ipv4Addr, path::PathBuf};
 
-use heck::ToShoutySnekCase;
+use heck::{ToShoutySnekCase, ToSnekCase};
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
@@ -647,7 +647,10 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     if cfg_name != cfg_name.trim()
         || cfg_name.is_empty()
-        || cfg_name.contains(['/', '\\', '?', ':', '"', '*', '|', '<', '>'])
+        || cfg_name
+            .to_snek_case()
+            .chars()
+            .any(|v| !"0123456789abcdefghijklmnopqrstuvwxyz_".contains(v))
     {
         return Err(Error::new_spanned(
             cfg.config_name,
@@ -663,7 +666,9 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
     let mut has_imu = None;
 
     for device in &cfg.devices {
-        if let Hub::ExpansionHub(span) = device.hub && !cfg.has_exp_hub {
+        if let Hub::ExpansionHub(span) = device.hub
+            && !cfg.has_exp_hub
+        {
             return Err(Error::new(
                 span,
                 "cannot use expansion hub in config with expansion hub disabled",
@@ -720,7 +725,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
 
     let xml = cfg.to_xml();
 
-    let out_path = xml_dir.join(format!("{}.xml", cfg.config_name.value()));
+    let out_path = xml_dir.join(format!("{}.xml", cfg.config_name.value().to_snek_case()));
 
     if out_path.exists() {
         let contents = std::fs::read_to_string(&out_path).unwrap();
