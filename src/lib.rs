@@ -33,7 +33,8 @@ use parking_lot::{Mutex, MutexGuard};
 pub use pastey;
 
 use crate::{
-    command::{Command, SCHEDULER, SubsystemMap}, hardware::{Hardware, IntoJniObject, config::HardwareConfig},
+    command::{Command, SCHEDULER, SubsystemMap},
+    hardware::{Hardware, IntoJniObject, config::HardwareConfig},
 };
 
 /// Commonly used items.
@@ -940,17 +941,16 @@ impl FtcContext {
         use android_logger::FilterBuilder;
 
         android_logger::init_once(
-            android_logger::Config::default()
-                .with_max_level(if cfg!(debug_assertions) {
-                    log::LevelFilter::Trace
-                } else {
-                    log::LevelFilter::Info
-                })
-                .with_filter(
-                    FilterBuilder::new()
-                        .filter(Some("jni::vm::java_vm"), log::LevelFilter::Warn)
-                        .build(),
-                ),
+            android_logger::Config::default().with_filter(
+                FilterBuilder::new()
+                    .filter_level(if cfg!(debug_assertions) {
+                        log::LevelFilter::Trace
+                    } else {
+                        log::LevelFilter::Info
+                    })
+                    .filter(Some("jni::vm::java_vm"), log::LevelFilter::Warn)
+                    .build(),
+            ),
         );
 
         let out = Self::new_no_log(env, this, kind, name, source);
@@ -974,7 +974,7 @@ impl FtcContext {
                     config_file,
                     jni_sig!(
                         "(Lcom/qualcomm/ftccommon/configuration/RobotConfigFileManager;Ljava/lang/\
-                         String;)Lcom/qualcomm/ftccommon/configuration/RobotConfigFile;"
+                        String;)V"
                     ),
                     &[(&cfg_mgr).into(), (&id).into()],
                 )
