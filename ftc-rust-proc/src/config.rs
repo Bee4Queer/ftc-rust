@@ -270,20 +270,11 @@ impl Parse for DeviceKind {
                     let ip;
                     let parens = parenthesized!(ip in input);
 
-                    let oct1 = ip.parse::<LitInt>()?;
-                    let _dot1 = ip.parse::<Token![.]>()?;
-                    let oct2 = ip.parse::<LitInt>()?;
-                    let _dot2 = ip.parse::<Token![.]>()?;
-                    let oct3 = ip.parse::<LitInt>()?;
-                    let _dot3 = ip.parse::<Token![.]>()?;
-                    let oct4 = ip.parse::<LitInt>()?;
-
-                    let ip = Ipv4Addr::from_octets([
-                        oct1.base10_parse::<u8>()?,
-                        oct2.base10_parse::<u8>()?,
-                        oct3.base10_parse::<u8>()?,
-                        oct4.base10_parse::<u8>()?,
-                    ]);
+                    let ip = ip
+                        .parse::<LitStr>()?
+                        .value()
+                        .parse::<Ipv4Addr>()
+                        .map_err(|v| Error::new(parens.span.join(), v.to_string()))?;
 
                     Ok(DeviceKind::Limelight {
                         limelight: root.span(),
