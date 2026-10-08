@@ -266,7 +266,7 @@ impl Parse for DeviceKind {
                     })
                 }
                 "EmbeddedIMU" => Ok(DeviceKind::EmbeddedIMU(root.span())),
-                "Limelight" => {
+                "Limelight3A" => {
                     let ip;
                     let parens = parenthesized!(ip in input);
 
@@ -295,7 +295,7 @@ impl Parse for DeviceKind {
                 _ => Err(Error::new_spanned(
                     root,
                     "expected a valid root device kind (one of Motor, Servo, CRServo, \
-                     RevSPARKMini, DigitalDevice, RevTouchSensor, I2C, EmbeddedIMU)",
+                     RevSPARKMini, DigitalDevice, RevTouchSensor, I2C, EmbeddedIMU, Limelight3A)",
                 )),
             }
         }
@@ -685,7 +685,7 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
                 ips.insert(ip.0, ip.1);
 
                 continue;
-            },
+            }
             DeviceKind::EmbeddedIMU(span) => {
                 if let Some(first) = has_imu {
                     let mut err = Error::new(span, "embedded IMU is already defined earlier");
