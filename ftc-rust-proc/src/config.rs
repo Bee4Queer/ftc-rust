@@ -32,6 +32,7 @@ impl Parse for Hub {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 enum MotorKind {
     Generic(Token![.], Span),
 
@@ -107,6 +108,7 @@ impl Parse for ServoKind {
 }
 
 #[derive(Copy, Clone)]
+#[allow(dead_code)]
 enum I2CKind {
     RevVL53L0XRangeSensor(Token![.], Span),
     LynxColorSensor(Token![.], Span),
@@ -135,6 +137,7 @@ impl Parse for I2CKind {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 enum DeviceKind {
     Motor {
         motor: Span,
@@ -169,7 +172,7 @@ enum DeviceKind {
         kind: I2CKind,
     },
     EmbeddedIMU(Span),
-    /// EthernetOverUsbConfiguration
+    /// `EthernetOverUsbConfiguration` in the XML file.
     Limelight {
         limelight: Span,
         parens: Paren,
@@ -467,6 +470,7 @@ impl Parse for ConfigInputPropVal {
     }
 }
 
+#[allow(dead_code)]
 enum ConfigInput {
     Property {
         attrs: Vec<Attribute>,
