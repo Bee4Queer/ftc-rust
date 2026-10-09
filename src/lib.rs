@@ -994,6 +994,8 @@ impl FtcContext {
             )
             .unwrap();
 
+            std::thread::sleep(Duration::from_secs(1));
+
             let app_util = env
                 .load_class(jni_str!(
                     "org/firstinspires/ftc/robotcore/internal/system/AppUtil"
