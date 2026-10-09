@@ -414,7 +414,7 @@ impl Direction {
     enum_variant_into! {
         pub body,
         "com/qualcomm/robotcore/hardware/DcMotorSimple$Direction",
-        "com.qualcomm.robotcore.hardware.DcMotorSimple.Direction",
+        "com.qualcomm.robotcore.hardware.DcMotorSimple$Direction",
         Forward,
         Reverse;
         PREFIX = DCMOTOR_;
@@ -424,7 +424,7 @@ impl Direction {
     enum_variant_into! {
         pub body,
         "com/qualcomm/robotcore/hardware/Servo$Direction",
-        "com.qualcomm.robotcore.hardware.Servo.Direction",
+        "com.qualcomm.robotcore.hardware.Servo$Direction",
         Forward,
         Reverse;
         PREFIX = SERVO_;
