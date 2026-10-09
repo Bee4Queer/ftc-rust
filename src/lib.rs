@@ -1046,7 +1046,7 @@ impl FtcContext {
         source: &'static Location<'static>,
     ) -> Self {
         std::panic::set_hook(Box::new(|info| {
-            let mut backtrace = format!("{:#?}", backtrace::Backtrace::new());
+            let backtrace = format!("{:#?}", backtrace::Backtrace::new());
 
             CURRENT_PANIC_TEXT.with(|v| {
                 *v.lock() = Some(PanicText {

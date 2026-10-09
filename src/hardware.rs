@@ -227,7 +227,7 @@ impl Hardware {
             return cached;
         }
         if !item.cfg.ensured.load(Ordering::Relaxed) {
-            if FtcContext::is_running_config_cfg_mgr(&self.vm, &self.cfg_mgr, item.cfg) {
+            if !FtcContext::is_running_config_cfg_mgr(&self.vm, &self.cfg_mgr, item.cfg) {
                 if self.any_config {
                     warn!("using hardware item from different configuration");
                 } else {

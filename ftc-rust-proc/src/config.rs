@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Write, net::Ipv4Addr, path::PathBuf};
 
-use heck::{ToShoutySnekCase, ToSnekCase};
+use heck::ToShoutySnekCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
