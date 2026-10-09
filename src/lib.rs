@@ -970,60 +970,21 @@ impl FtcContext {
         let active = out.active_config();
 
         if active != config.id && !any_config {
-            let cfg_mgr = env.new_local_ref(&out.cfg_mgr).unwrap();
-            let id = new_string!(env env, format!("{}.xml", config.id)).unwrap();
-            let config_file = env
-                .load_class(jni_str!(
-                    "com/qualcomm/ftccommon/configuration/RobotConfigFile"
-                ))
-                .unwrap();
-
-            let cfg = env
-                .new_object(
-                    config_file,
-                    jni_sig!(
-                        "(Lcom/qualcomm/ftccommon/configuration/RobotConfigFileManager;Ljava/lang/\
-                        String;)V"
-                    ),
-                    &[(&cfg_mgr).into(), (&id).into()],
-                )
-                .unwrap();
-
-            env.call_method(
-                &cfg_mgr,
-                jni_str!("setActiveConfigAndUpdateUI"),
-                jni_sig!("(ZLcom/qualcomm/ftccommon/configuration/RobotConfigFile;)V"),
-                &[false.into(), (&cfg).into()],
-            )
-            .unwrap();
-
-            std::thread::sleep(Duration::from_secs(1));
-
-            let event_loop_handler = env
-                .get_field(
-                    &out.event_loop,
-                    jni_str!("ftcEventLoopHandler"),
-                    jni_sig!("Lcom/qualcomm/ftccommon/FtcEventLoopHandler;"),
-                )
-                .unwrap()
-                .l()
-                .unwrap();
-
-            warn!(
-                "Restarting app to set active configuration; please wait a moment. If you want to \
-                 override this, hold A on either gamepad (make sure to press Start+A/Start+B \
-                 first!) while initializing the opmode."
+            let formatted = format!(
+                "Please set config to {}. If you want to override this, hold A on either gamepad \
+                 (make sure to press Start+A/Start+B first!) while initializing the opmode.",
+                config.id
             );
+            warn!("{formatted}");
 
-            env.call_method(
-                event_loop_handler,
-                jni_str!("restartRobot"),
-                jni_sig!("()V"),
-                &[],
-            )
-            .unwrap();
+            let telemetry = out.telemetry();
 
-            unreachable!(); // `restartApp` never returns normally
+            telemetry.add_data("$System$Error$", formatted);
+            telemetry.update();
+
+            loop {
+                std::thread::yield_now();
+            }
         }
 
         info!("Rust FTC initalized");

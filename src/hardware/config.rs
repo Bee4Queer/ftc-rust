@@ -149,7 +149,8 @@ pub mod device_docs {
     pub struct Servo;
     /// A continuous servo motor that doesn't have defined stops.
     pub struct CRServo;
-    /// The REV spark mini motor controller. Shows up as a [`DcMotorSimple`](crate::hardware::DcMotorSimple) in code.
+    /// The REV spark mini motor controller. Shows up as a
+    /// [`DcMotorSimple`](crate::hardware::DcMotorSimple) in code.
     pub struct RevSPARKMini;
 
     /// The IMU embedded in the control hub. Cannot be used under an expansion hub.

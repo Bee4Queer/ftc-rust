@@ -396,11 +396,13 @@ impl Config {
                 let _ = writeln!(
                     out,
                     r#"            <{} name="{}"{} />"#,
-                    tag, if matches!(device.kind, DeviceKind::EmbeddedIMU(_)) {
+                    tag,
+                    if matches!(device.kind, DeviceKind::EmbeddedIMU(_)) {
                         Ident::new("imu", device.name.span())
                     } else {
                         device.name.clone()
-                    }, attrs
+                    },
+                    attrs
                 );
             }
         }

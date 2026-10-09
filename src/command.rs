@@ -182,7 +182,9 @@ impl CommandScheduler {
                 .spawn(move || {
                     ctx.init_thread_silent();
 
-                    let subsystems: Arc<RwLock<HashMap<SubsystemHandle<dyn Subsystem>, StoredSubsystem>>> = Arc::new(RwLock::new(HashMap::new()));
+                    let subsystems: Arc<
+                        RwLock<HashMap<SubsystemHandle<dyn Subsystem>, StoredSubsystem>>,
+                    > = Arc::new(RwLock::new(HashMap::new()));
                     let dependencies = Arc::new(RwLock::new(HashMap::new()));
 
                     loop {
@@ -216,27 +218,43 @@ impl CommandScheduler {
                                     ctx.init_thread();
                                     let res = catch_unwind(AssertUnwindSafe(|| {
                                         match state {
-                                            CommandState::Finished | CommandState::Panicked(_) | CommandState::DependenciesUsed(_) => {}
+                                            CommandState::Finished
+                                            | CommandState::Panicked(_)
+                                            | CommandState::DependenciesUsed(_) => {}
                                             CommandState::Uninitialized => {
                                                 let mut subsystems = subsystems.write();
                                                 let mut dependencies = dependencies.write();
 
-                                                let handles = cmd.dependencies()
-                                                        .into_iter()
-                                                        .collect::<HashSet<_>>();
+                                                let handles = cmd
+                                                    .dependencies()
+                                                    .into_iter()
+                                                    .collect::<HashSet<_>>();
                                                 let mut cmd_dependencies = HashMap::new();
-                                                let mut used = HashSet::with_capacity(handles.len());
+                                                let mut used =
+                                                    HashSet::with_capacity(handles.len());
 
                                                 for dependency in handles {
-                                                    let subsystem = &mut match subsystems.get_mut(&dependency) {
+                                                    let subsystem = &mut match subsystems
+                                                        .get_mut(&dependency)
+                                                    {
                                                         Some(v) => v,
                                                         None => {
-                                                            subsystems.insert(dependency, StoredSubsystem {
-                                                                subsystem: Some(dependency.creator.expect("no creator for dependency")()),
-                                                            });
+                                                            subsystems.insert(
+                                                                dependency,
+                                                                StoredSubsystem {
+                                                                    subsystem: Some(dependency
+                                                                        .creator
+                                                                        .expect(
+                                                                            "no creator for \
+                                                                             dependency",
+                                                                        )(
+                                                                    )),
+                                                                },
+                                                            );
                                                             subsystems.get_mut(&dependency).unwrap()
-                                                        },
-                                                    }.subsystem;
+                                                        }
+                                                    }
+                                                    .subsystem;
 
                                                     if subsystem.is_none() {
                                                         // dependency being used already yuo binch
@@ -244,7 +262,10 @@ impl CommandScheduler {
                                                         continue;
                                                     }
 
-                                                    cmd_dependencies.insert(dependency, subsystem.take().unwrap());
+                                                    cmd_dependencies.insert(
+                                                        dependency,
+                                                        subsystem.take().unwrap(),
+                                                    );
                                                 }
 
                                                 if !used.is_empty() {
@@ -256,19 +277,18 @@ impl CommandScheduler {
                                                     subsystems: cmd_dependencies,
                                                 };
 
-                                                dependencies.insert(
-                                                    *id,
-                                                    cmd_dependencies,
-                                                );
+                                                dependencies.insert(*id, cmd_dependencies);
 
-                                                let cmd_dependencies = dependencies.get_mut(id).unwrap();
+                                                let cmd_dependencies =
+                                                    dependencies.get_mut(id).unwrap();
 
                                                 cmd.init(&ctx, cmd_dependencies);
                                                 *state = CommandState::Executing;
                                             }
                                             CommandState::Executing => {
                                                 let mut dependencies = dependencies.write();
-                                                let cmd_dependencies = dependencies.get_mut(id).unwrap();
+                                                let cmd_dependencies =
+                                                    dependencies.get_mut(id).unwrap();
                                                 cmd.execute(&ctx, cmd_dependencies);
                                             }
                                         }
@@ -576,7 +596,8 @@ pub trait Subsystem: Any + Debug + Send + Sync + 'static {
     fn update(&mut self, ctx: &FtcContext) {}
 }
 
-/// A handle to a subsystem. If you get clippy::mutable_key_type, you can safely ignore it. The Hash implementation prevents interior mutability being a concern in all real-world scenarios.
+/// A handle to a subsystem. If you get clippy::mutable_key_type, you can safely ignore it. The Hash
+/// implementation prevents interior mutability being a concern in all real-world scenarios.
 pub struct SubsystemHandle<S: Subsystem + ?Sized> {
     id: &'static AtomicU64,
     creator: Option<fn() -> Box<dyn Subsystem>>,

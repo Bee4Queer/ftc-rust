@@ -8,7 +8,10 @@ use jni::{
 };
 
 use crate::{
-    FtcContext, clone_global_ref, command::{Command, CommandHandle, SubsystemMap}, enum_variant_into, hardware::IntoJniObject,
+    FtcContext, clone_global_ref,
+    command::{Command, CommandHandle, SubsystemMap},
+    enum_variant_into,
+    hardware::IntoJniObject,
 };
 
 /// The main Pedro Pathing struct. Needed to encapsulate a bunch of quirks of Pedro.

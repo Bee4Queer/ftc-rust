@@ -267,7 +267,7 @@ impl Hardware {
             .unwrap();
 
         let out = T::from_java(self.vm.clone(), object);
-        
+
         *item.cached.write() = Some(out.clone());
 
         out
