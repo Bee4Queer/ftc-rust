@@ -988,9 +988,9 @@ impl FtcContext {
 
             env.call_method(
                 &cfg_mgr,
-                jni_str!("setActiveConfig"),
-                jni_sig!("(Lcom/qualcomm/ftccommon/configuration/RobotConfigFile;)V"),
-                &[(&cfg).into()],
+                jni_str!("setActiveConfigAndUpdateUI"),
+                jni_sig!("(ZLcom/qualcomm/ftccommon/configuration/RobotConfigFile;)V"),
+                &[false.into(), (&cfg).into()],
             )
             .unwrap();
 
