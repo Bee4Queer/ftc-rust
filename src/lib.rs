@@ -979,7 +979,7 @@ impl FtcContext {
 
             let telemetry = out.telemetry();
 
-            telemetry.add_data("$System$Error$", formatted);
+            telemetry.add_data("ftc-rust", formatted);
             telemetry.update();
 
             loop {
