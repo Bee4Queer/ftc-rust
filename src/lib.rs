@@ -783,6 +783,8 @@ pub struct FtcContext {
     this: Global<JObject<'static>>,
     /// com/qualcomm/ftccommon/configuration/RobotConfigFileManager
     cfg_mgr: Global<JObject<'static>>,
+    /// ajkdsaihsgdp
+    event_loop: Global<JObject<'static>>,
     /// The type of this op mode.
     kind: OpModeType,
     /// The name of this op mode.
@@ -904,6 +906,7 @@ impl Clone for FtcContext {
         Self {
             this: clone_global_ref(&self.vm, &self.this),
             cfg_mgr: clone_global_ref(&self.vm, &self.cfg_mgr),
+            event_loop: clone_global_ref(&self.vm, &self.event_loop),
             vm: self.vm.clone(),
             kind: self.kind,
             name: self.name,
@@ -996,17 +999,11 @@ impl FtcContext {
 
             std::thread::sleep(Duration::from_secs(1));
 
-            let app_util = env
-                .load_class(jni_str!(
-                    "org/firstinspires/ftc/robotcore/internal/system/AppUtil"
-                ))
-                .unwrap();
-            let app_util = env
-                .call_static_method(
-                    app_util,
-                    jni_str!("getInstance"),
-                    jni_sig!("()Lorg/firstinspires/ftc/robotcore/internal/system/AppUtil;"),
-                    &[],
+            let event_loop_handler = env
+                .get_field(
+                    &out.event_loop,
+                    jni_str!("ftcEventLoopHandler"),
+                    jni_sig!("Lcom/qualcomm/ftccommon/FtcEventLoopHandler;"),
                 )
                 .unwrap()
                 .l()
@@ -1019,10 +1016,10 @@ impl FtcContext {
             );
 
             env.call_method(
-                app_util,
-                jni_str!("restartApp"),
-                jni_sig!("(I)V"),
-                &[0i32.into()],
+                event_loop_handler,
+                jni_str!("restartRobot"),
+                jni_sig!("()V"),
+                &[],
             )
             .unwrap();
 
@@ -1084,7 +1081,7 @@ impl FtcContext {
             .unwrap();
         let cfg_mgr = env
             .get_field(
-                event_loop,
+                &event_loop,
                 jni_str!("robotCfgFileMgr"),
                 jni_sig!("Lcom/qualcomm/ftccommon/configuration/RobotConfigFileManager;"),
             )
@@ -1095,6 +1092,7 @@ impl FtcContext {
         let out = Self {
             this: env.new_global_ref(this).unwrap(),
             cfg_mgr: env.new_global_ref(cfg_mgr).unwrap(),
+            event_loop: env.new_global_ref(event_loop).unwrap(),
             vm: env.get_java_vm().unwrap(),
             kind,
             name,
