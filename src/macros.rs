@@ -294,7 +294,7 @@ macro_rules! enum_variant_into {
             $vis const [< $($prefix)? JAVA_CLASS >]: &'static str = $java_class;
             /// conversion
             $vis fn [< into_jni_object $($suffix)? >]<'local>(self, env: &mut $crate::jni::Env<'local>) -> $crate::jni::objects::JObject<'local> {
-                let class = $crate::hardware::get_class(env, Self:: [< $($prefix)? JAVA_CLASS >]);
+                let class = $crate::hardware::get_class(env, Self:: [< $($prefix)? JNI_CLASS >]);
                 env
                     .get_static_field(
                         class,

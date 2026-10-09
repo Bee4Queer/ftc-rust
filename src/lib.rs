@@ -971,7 +971,7 @@ impl FtcContext {
             let id = new_string!(env env, format!("{}.xml", config.id)).unwrap();
             let config_file = env
                 .load_class(jni_str!(
-                    "com.qualcomm.ftccommon.configuration.RobotConfigFile"
+                    "com/qualcomm/ftccommon/configuration/RobotConfigFile"
                 ))
                 .unwrap();
 
@@ -996,7 +996,7 @@ impl FtcContext {
 
             let app_util = env
                 .load_class(jni_str!(
-                    "org.firstinspires.ftc.robotcore.internal.system.AppUtil"
+                    "org/firstinspires/ftc/robotcore/internal/system/AppUtil"
                 ))
                 .unwrap();
             let app_util = env
@@ -1059,7 +1059,7 @@ impl FtcContext {
 
         let manual_control_op_mode = env
             .load_class(jni_str!(
-                "org.firstinspires.ftc.ftccommon.internal.manualcontrol.ManualControlOpMode"
+                "org/firstinspires/ftc/ftccommon/internal/manualcontrol/ManualControlOpMode"
             ))
             .unwrap();
         let event_loop_manager = env

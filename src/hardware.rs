@@ -246,7 +246,7 @@ impl Hardware {
         let object = self
             .vm
             .attach_current_thread(|env| {
-                let class = env.load_class(JNIString::new(T::JAVA_CLASS))?;
+                let class = env.load_class(JNIString::new(T::JNI_CLASS))?;
                 let jname = new_string!(env env, &item.id)?;
 
                 let res = env.call_method(
@@ -414,7 +414,7 @@ impl Direction {
     enum_variant_into! {
         pub body,
         "com/qualcomm/robotcore/hardware/DcMotorSimple$Direction",
-        "com.qualcomm.robotcore.hardware.DcMotorSimple$Direction",
+        "com.qualcomm.robotcore.hardware.DcMotorSimple.Direction",
         Forward,
         Reverse;
         PREFIX = DCMOTOR_;
@@ -424,7 +424,7 @@ impl Direction {
     enum_variant_into! {
         pub body,
         "com/qualcomm/robotcore/hardware/Servo$Direction",
-        "com.qualcomm.robotcore.hardware.Servo$Direction",
+        "com.qualcomm.robotcore.hardware.Servo.Direction",
         Forward,
         Reverse;
         PREFIX = SERVO_;
@@ -628,7 +628,7 @@ impl IntoJniObject for AngularVelocity {
         "org/firstinspires/ftc/robotcore/external/navigation/AngularVelocity";
 
     fn into_jni_object<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
-        let class = get_class(env, Self::JAVA_CLASS);
+        let class = get_class(env, Self::JNI_CLASS);
 
         let angle = self.unit.into_jni_object(env);
 
@@ -821,7 +821,7 @@ impl IntoJniObject for YawPitchRollAngles {
     fn into_jni_object<'local>(self, env: &mut Env<'local>) -> JObject<'local> {
         debug_assert!(self.validate());
 
-        let class = get_class(env, Self::JAVA_CLASS);
+        let class = get_class(env, Self::JNI_CLASS);
 
         let angle = self.unit.into_jni_object(env);
 
@@ -990,7 +990,7 @@ impl IntoJniObject for Rev9AxisImuOrientationOnRobot {
         let logo = self.logo_dir.into_jni_object_logo(env);
         let i2c = self.i2c_dir.into_jni_object_i2c(env);
 
-        let class = get_class(env, Self::JAVA_CLASS);
+        let class = get_class(env, Self::JNI_CLASS);
 
         env.new_object(
             class,

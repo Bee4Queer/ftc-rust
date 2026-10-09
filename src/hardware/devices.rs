@@ -509,7 +509,7 @@ impl IMU {
         self.vm
             .attach_current_thread(|env| {
                 let orientation = orientation.into_jni_object(env);
-                let class = get_class(env, "com.qualcomm.robotcore.hardware.IMU.Parameters");
+                let class = get_class(env, "com/qualcomm/robotcore/hardware/IMU$Parameters");
 
                 let params = env.new_object(
                     class,
