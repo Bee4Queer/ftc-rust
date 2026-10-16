@@ -714,13 +714,16 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
             }
         };
 
-        if let Some(first) = hash_set.get(&port.0) {
-            let mut err = Error::new(port.1, "this port is already defined earlier");
+        // ports are numbered per hub, so the same port can be used once on each hub
+        let key = (matches!(device.hub, Hub::ExpansionHub(_)), port.0);
+
+        if let Some(first) = hash_set.get(&key) {
+            let mut err = Error::new(port.1, "this port is already defined earlier on this hub");
             err.combine(Error::new(*first, "port is defined here"));
             return Err(err);
         }
 
-        hash_set.insert(port.0, port.1);
+        hash_set.insert(key, port.1);
     }
 
     let xml_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
