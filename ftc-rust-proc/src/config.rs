@@ -114,6 +114,7 @@ enum I2CKind {
     LynxColorSensor(Token![.], Span),
     RevColorSensorV3(Token![.], Span),
     RevBlinkinLedDriver(Token![.], Span),
+    GoBildaPinpoint(Token![.], Span),
 }
 
 impl Parse for I2CKind {
@@ -126,11 +127,12 @@ impl Parse for I2CKind {
             "LynxColorSensor" => Ok(Self::LynxColorSensor(dot, name.span())),
             "RevColorSensorV3" => Ok(Self::RevColorSensorV3(dot, name.span())),
             "RevBlinkinLedDriver" => Ok(Self::RevBlinkinLedDriver(dot, name.span())),
+            "GoBildaPinpoint" => Ok(Self::GoBildaPinpoint(dot, name.span())),
 
             _ => Err(Error::new_spanned(
                 name,
                 "expected a valid i2c device kind (one of RevVL53L0XRangeSensor, LynxColorSensor, \
-                 RevColorSensorV3, RevBlinkinLedDriver)",
+                 RevColorSensorV3, RevBlinkinLedDriver, GoBildaPinpoint)",
             )),
         }
     }
@@ -189,13 +191,9 @@ impl DeviceKind {
                 ServoKind::CRServo(_) => quote! { ::ftc::hardware::CRServo },
                 ServoKind::RevSPARKMini(_) => quote! { ::ftc::hardware::DcMotorSimple },
             },
-            DeviceKind::DigitalDevice { .. } => {
-                todo!("digital devices are not currently implemented")
-            }
-            DeviceKind::RevTouchSensor { .. } => {
-                todo!("rev touch sensors are not currently implemented")
-            }
-            DeviceKind::I2C { .. } => todo!("i2c devices are not currently implemented"),
+            DeviceKind::DigitalDevice { .. } => quote! {}, // just skip it
+            DeviceKind::RevTouchSensor { .. } => quote! {}, // just skip it
+            DeviceKind::I2C { .. } => quote! {}, // just skip it
             DeviceKind::EmbeddedIMU(_) => quote! { ::ftc::hardware::IMU },
             DeviceKind::Limelight { .. } => quote! { ::ftc::hardware::limelight::Limelight3A },
         }
@@ -382,6 +380,7 @@ impl Config {
                             I2CKind::LynxColorSensor(_, _) => "LynxColorSensor",
                             I2CKind::RevColorSensorV3(_, _) => "RevColorSensorV3",
                             I2CKind::RevBlinkinLedDriver(_, _) => "RevBlinkinLedDriver",
+                            I2CKind::GoBildaPinpoint(_, _) => "goBILDAPinpoint",
                         },
                         format!(r#" port="{}" bus="{bus}""#, u8::from(*bus == 0)),
                     ),
@@ -783,6 +782,16 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
         let vis = &v.vis;
         let name = &v.name;
         let ty = v.kind.type_name();
+        if ty.is_empty() {
+            return quote! {
+                #(#attrs)*
+                #vis static #name: &::#ftc::hardware::config::HardwareItem<::#ftc::hardware::HardwareDevice> = {
+                    static INNER: ::#ftc::hardware::config::HardwareItem<::#ftc::hardware::HardwareDevice> =
+                        ::#ftc::hardware::config::HardwareItem::new(stringify!(#name), &#config_name);
+                    &INNER
+                };
+            };
+        }
         let attrs = &v.attrs;
         quote! {
             #(#attrs)*
@@ -833,9 +842,9 @@ pub fn config(tokens: TokenStream) -> syn::Result<TokenStream> {
                 ServoKind::CRServo(span) => quote_spanned! {*span=> CRServo},
                 ServoKind::RevSPARKMini(span) => quote_spanned! {*span=> RevSPARKMini},
             },
-            DeviceKind::DigitalDevice { .. } => todo!(),
-            DeviceKind::RevTouchSensor { .. } => todo!(),
-            DeviceKind::I2C { .. } => todo!(),
+            DeviceKind::DigitalDevice { device: span, .. } => return quote_spanned! {*span =>}, // just skip it
+            DeviceKind::RevTouchSensor { device: span, .. } => return quote_spanned! {*span =>}, // just skip it
+            DeviceKind::I2C { i2c: span, .. } => return quote_spanned! {*span =>}, // just skip it
             DeviceKind::EmbeddedIMU(span) => quote_spanned! {*span=> EmbeddedIMU},
             DeviceKind::Limelight { limelight, .. } => quote_spanned! {*limelight=> Limelight3A},
         };
