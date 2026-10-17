@@ -431,7 +431,7 @@ impl Config {
         end_module(&mut out);
 
         if self.has_exp_hub {
-            output_module(&mut out, "Expansion Hub", 3);
+            output_module(&mut out, "Expansion Hub 1", 1);
             output_devices(&mut out, exp_hub_devices);
             end_module(&mut out);
         }
