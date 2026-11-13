@@ -363,7 +363,7 @@ impl IntoJniObject for Quat {
         env.new_object(
             class,
             jni::signature::RuntimeMethodSignature::from_str(
-                "(FFFFJ)Lorg.firstinspires.ftc.robotcore.external.navigation.Quaternion;",
+                "(FFFFJ)V",
             )
             .unwrap()
             .method_signature(),
@@ -635,9 +635,8 @@ impl IntoJniObject for AngularVelocity {
         env.new_object(
             class,
             RuntimeMethodSignature::from_str(format!(
-                "(L{};FFFJ)L{};",
+                "(L{};FFFJ)V",
                 AngleUnit::JNI_CLASS,
-                Self::JNI_CLASS
             ))
             .unwrap()
             .method_signature(),
@@ -828,9 +827,8 @@ impl IntoJniObject for YawPitchRollAngles {
         env.new_object(
             class,
             RuntimeMethodSignature::from_str(format!(
-                "(L{};DDDJ)L{};",
+                "(L{};DDDJ)V",
                 AngleUnit::JNI_CLASS,
-                Self::JNI_CLASS
             ))
             .unwrap()
             .method_signature(),
@@ -995,10 +993,9 @@ impl IntoJniObject for Rev9AxisImuOrientationOnRobot {
         env.new_object(
             class,
             RuntimeMethodSignature::from_str(format!(
-                "(L{};L{};)L{};",
+                "(L{};L{};)V",
                 Orientation::LOGO_JNI_CLASS,
                 Orientation::I2C_JNI_CLASS,
-                Self::JNI_CLASS
             ))
             .unwrap()
             .method_signature(),
@@ -1277,8 +1274,7 @@ impl IntoJniObject for DVec3 {
         env.new_object(
             class,
             jni_sig!(
-                "(Lorg/firstinspires/ftc/robotcore/external/navigation/DistanceUnit;DDDJ)Lorg/\
-                 firstinspires/ftc/robotcore/external/navigation/Position;"
+                "(Lorg/firstinspires/ftc/robotcore/external/navigation/DistanceUnit;DDDJ)V"
             ),
             &[
                 (&unit_mm).into(),
@@ -1341,8 +1337,7 @@ impl IntoJniObject for Pose3D {
             class,
             jni_sig!(
                 "(Lorg/firstinspires/ftc/robotcore/external/navigation/Position;Lorg/\
-                 firstinspires/ftc/robotcore/external/navigation/YawPitchRollAngles;)Lorg/\
-                 firstinspires/ftc/robotcore/external/navigation/Pose3D;"
+                 firstinspires/ftc/robotcore/external/navigation/YawPitchRollAngles;)V"
             ),
             &[(&pos).into(), (&orientation).into()],
         )

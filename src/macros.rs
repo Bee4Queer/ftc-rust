@@ -223,11 +223,11 @@ macro_rules! jlist {
             use $crate::jni::refs::Reference;
             let env: &mut $crate::jni::Env = $env;
             let class = env.find_class($crate::jni::objects::JList::class_name()).unwrap();
-            let obj = env.new_object(class, $crate::jni::jni_sig!("()Ljava/util/List;"), &[]).unwrap();
+            let obj = env.new_object(class, $crate::jni::jni_sig!("()V"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
             let class = env.find_class($crate::jni::jni_str!("java/lang/Float")).unwrap();
             $(
-                let arg = env.new_object(&class, $crate::jni::jni_sig!("(F)Ljava/lang/Float;"), &[$args.into()]).unwrap();
+                let arg = env.new_object(&class, $crate::jni::jni_sig!("(F)V"), &[$args.into()]).unwrap();
                 out.add(env, &arg).unwrap();
             )*
             out
@@ -238,7 +238,7 @@ macro_rules! jlist {
             use $crate::jni::refs::Reference;
             let env: &mut $crate::jni::Env = $env;
             let class = env.find_class($crate::jni::objects::JList::class_name()).unwrap();
-            let obj = env.new_object(class, jni_sig!("()Ljava/util/List;"), &[]).unwrap();
+            let obj = env.new_object(class, jni_sig!("()V"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
             $(
                 out.add(env, (&$args).into()).unwrap();
@@ -251,7 +251,7 @@ macro_rules! jlist {
             use $crate::jni::refs::Reference;
             let env: &mut $crate::jni::Env = $env;
             let class = env.find_class($crate::jni::objects::JList::class_name()).unwrap();
-            let obj = env.new_object(class, jni_sig!("()Ljava/util/List;"), &[]).unwrap();
+            let obj = env.new_object(class, jni_sig!("()V"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
             for val in $val {
                 out.add(env, &val).unwrap();
@@ -264,7 +264,7 @@ macro_rules! jlist {
             use $crate::jni::refs::Reference;
             let env: &mut $crate::jni::Env = $env;
             let class = env.find_class($crate::jni::objects::JList::class_name()).unwrap();
-            let obj = env.new_object(class, jni_sig!("()Ljava/util/List;"), &[]).unwrap();
+            let obj = env.new_object(class, jni_sig!("()V"), &[]).unwrap();
             let out = $crate::jni::objects::JList::cast_local(env, obj).unwrap();
             for val in $val {
                 let val = val.into_jni_object(env);

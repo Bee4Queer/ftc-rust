@@ -514,7 +514,7 @@ impl IMU {
                 let params = env.new_object(
                     class,
                     RuntimeMethodSignature::from_str(format!(
-                        "(L{};)Lcom/qualcomm/robotcore/hardware/IMU$Parameters;",
+                        "(L{};)V",
                         Rev9AxisImuOrientationOnRobot::JNI_CLASS
                     ))?
                     .method_signature(),

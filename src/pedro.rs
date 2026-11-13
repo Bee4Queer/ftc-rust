@@ -264,7 +264,7 @@ impl IntoJniObject for Pose {
 
         env.new_object(
             class,
-            jni_sig!("(DDD)Lcom/pedropathing/math/Pose;"),
+            jni_sig!("(DDD)V"),
             &[self.pos.x.into(), self.pos.y.into(), self.heading.into()],
         )
         .unwrap()

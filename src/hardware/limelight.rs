@@ -598,8 +598,7 @@ impl IntoJniObject for LLFieldMapFiducial {
         env.new_object(
             class,
             jni_sig!(
-                "(IDLjava/lang/String;Ljava/util/List;Z)Lcom/qualcomm/hardware/limelightvision/\
-                 LLFieldMap$Fiducial;"
+                "(IDLjava/lang/String;Ljava/util/List;Z)V"
             ),
             &[
                 (self.id as i32).into(),
@@ -660,8 +659,7 @@ impl IntoJniObject for LLFieldMap {
         env.new_object(
             class,
             jni_sig!(
-                "(Ljava/util/List;Ljava/lang/String;)Lcom/qualcomm/hardware/limelightvision/\
-                 LLFieldMap;"
+                "(Ljava/util/List;Ljava/lang/String;)V"
             ),
             &[(&fiducials).into(), (&ty).into()],
         )
