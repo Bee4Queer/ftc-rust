@@ -1374,7 +1374,7 @@ impl FtcContext {
     #[must_use]
     pub fn running(&self) -> bool {
         if self.is_iterative() {
-            return self.current_stage() == OpModeStage::Running;
+            return matches!(self.current_stage(), OpModeStage::Init | OpModeStage::Running);
         }
         call_method!(bool self, self.this, "opModeIsActive", "()Z", [])
     }

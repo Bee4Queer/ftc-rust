@@ -6,6 +6,7 @@ use glam::{DVec2, dvec2};
 use jni::{
     JValueOwned, jni_sig, jni_str, objects::JObject, refs::Global, strings::JNIString, vm::JavaVM,
 };
+use log::info;
 
 use crate::{
     FtcContext, clone_global_ref,
@@ -63,7 +64,7 @@ impl Pedro {
         constants_class: impl AsRef<str>,
         start_pose: Pose,
     ) -> Self {
-        ftc.vm
+        let pedro = ftc.vm
             .attach_current_thread(|env| {
                 let hardware_map = ftc.hardware().hardware_map;
                 let hardware_map = env.new_local_ref(hardware_map)?;
@@ -95,10 +96,16 @@ impl Pedro {
                     vm: ftc.vm.clone(),
                 })
             })
-            .unwrap()
+            .unwrap();
+
+        UpdatePedro {
+            pedro: pedro.clone()
+        }.schedule();
+
+        pedro
     }
     /// Needs to be called every loop. Updates internal state for position of the robot.
-    pub fn update(&self) {
+    fn update(&self) {
         self.vm
             .attach_current_thread(|env| {
                 env.call_method(&self.follower, jni_str!("update"), jni_sig!("()V"), &[])
@@ -200,6 +207,16 @@ impl Pedro {
     }
 }
 
+struct UpdatePedro {
+    pedro: Pedro,
+}
+
+impl Command for UpdatePedro {
+    fn execute(&mut self, _ctx: &FtcContext, _map: &mut SubsystemMap) {
+        self.pedro.update();
+    }
+}
+
 /// The current mode of the [Pedro Pathing follower](Pedro).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Mode {
@@ -232,7 +249,6 @@ enum_variant_into! {
 
 /// A pose in Pedro Pathing.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[must_use]
 pub struct Pose {
     /// In inches.
     pub pos: DVec2,
@@ -341,19 +357,22 @@ impl Pedro {
                 .unwrap(),
             pedro: self.clone(),
         }
+        .heading_linear(start.heading, end.heading)
     }
     /// Creates a Bézier curve.
     /// Requires at least 2 control poses.
     /// The first and last poses are the start and end of the curve, while the intermediate poses
     /// are control poses.
     pub fn curve(&self, poses: impl AsRef<[Pose]>) -> Path {
+        let poses = poses.as_ref();
+        assert!(poses.len() >= 2);
         Path {
             vm: self.vm.clone(),
             path: self
                 .vm
                 .attach_current_thread(|env| {
                     let path_class = env.load_class(jni_str!("com/pedropathing/api/Paths"))?;
-                    let poses = crate::jlist![env env; from poses.as_ref()];
+                    let poses = crate::jlist![env env; from poses];
                     let path = env
                         .call_static_method(
                             &path_class,
@@ -369,6 +388,10 @@ impl Pedro {
                 .unwrap(),
             pedro: self.clone(),
         }
+        .heading_linear(
+            poses.first().unwrap().heading,
+            poses.last().unwrap().heading,
+        )
     }
 }
 
@@ -555,7 +578,7 @@ impl Command for FollowPathCommand {
             .unwrap();
     }
     fn is_finished(&mut self, ctx: &FtcContext, _: &mut SubsystemMap) -> bool {
-        ctx.vm
+        let aaa = ctx.vm
             .attach_current_thread(|env| {
                 env.call_method(
                     &self.path.pedro.follower,
@@ -565,7 +588,9 @@ impl Command for FollowPathCommand {
                 )
                 .and_then(JValueOwned::z)
             })
-            .unwrap()
+            .unwrap();
+        info!("aaa {aaa}");
+        aaa
     }
 }
 

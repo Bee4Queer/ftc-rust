@@ -17,8 +17,8 @@ use std::{
     time::Duration,
 };
 
-use log::error;
-use parking_lot::{Condvar, Mutex, RwLock, RwLockReadGuard};
+use log::{error, warn};
+use parking_lot::{Condvar, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{FtcContext, PanicText, take_panic_text};
 
@@ -30,6 +30,7 @@ pub(crate) static SCHEDULER: LazyLock<RwLock<CommandScheduler>> = LazyLock::new(
         queue_len: Arc::new(AtomicUsize::new(0)),
         command_i: AtomicU64::new(0),
         commands: Arc::new(Mutex::new(HashMap::with_capacity(16))),
+        context: None,
         runner_thread: None,
     })
 });
@@ -40,6 +41,15 @@ pub(crate) static SCHEDULER: LazyLock<RwLock<CommandScheduler>> = LazyLock::new(
 /// [`Command`]s.
 pub fn get_scheduler<'a>() -> RwLockReadGuard<'a, CommandScheduler> {
     SCHEDULER.read()
+}
+
+/// Get the scheduler. Should generally not be used as most methods are
+/// otherwise available on other types. Shouldn't be used to schedule commands,
+/// use the method [`schedule`](Command::schedule) available on all
+/// [`Command`]s.
+#[doc(hidden)]
+pub fn get_scheduler_mut<'a>() -> RwLockWriteGuard<'a, CommandScheduler> {
+    SCHEDULER.write()
 }
 
 /// The current state of a command.
@@ -56,6 +66,8 @@ pub enum CommandState {
     Panicked(PanicText),
     /// Some dependencies are already being used.
     DependenciesUsed(HashSet<SubsystemHandle<dyn Subsystem>>),
+    /// This thread ran too long and was emergency stopped.
+    Cancelled,
 }
 
 impl CommandState {
@@ -64,7 +76,7 @@ impl CommandState {
     pub fn ended(&self) -> bool {
         matches!(
             self,
-            Self::Finished | Self::Panicked(_) | Self::DependenciesUsed(_)
+            Self::Finished | Self::Panicked(_) | Self::DependenciesUsed(_) | Self::Cancelled
         )
     }
     /// The text for a panic from the associated command, if one exists.
@@ -105,6 +117,7 @@ pub struct CommandScheduler {
     command_i: AtomicU64,
     /// Stored commands
     commands: Arc<Mutex<HashMap<CommandId, StoredCommand>>>,
+    context: Option<FtcContext>,
     /// The runner thread.
     runner_thread: Option<(JoinHandle<()>, Arc<Condvar>)>,
 }
@@ -113,7 +126,7 @@ impl Debug for CommandScheduler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CommandScheduler")
             .field("queue_len", &self.queue_len())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -125,13 +138,13 @@ impl CommandScheduler {
     /// Return the length of the command queue.
     #[must_use]
     pub fn queue_len(&self) -> usize {
-        self.queue_len.load(std::sync::atomic::Ordering::Acquire)
+        self.queue_len.load(std::sync::atomic::Ordering::SeqCst)
     }
     /// Execute this command.
     pub fn execute(&self, command: impl Command) -> CommandHandle {
         let id = self
             .command_i
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.commands.lock().insert(
             id,
             StoredCommand {
@@ -144,23 +157,27 @@ impl CommandScheduler {
         CommandHandle { id }
     }
     /// Waits until the queue is clear.
-    pub fn wait_until_queue_clear(&self) {
-        if self.queue_len() == 0 {
-            return;
+    pub fn wait_until_queue_clear_and_stop(&mut self) {
+        while self.queue_len() != 0 && self.context.as_ref().unwrap().running() {
+            std::thread::yield_now();
         }
-        self.empty.wait(&mut self.empty_mutex.lock());
+        self.stop();
     }
     /// Stop the scheduler. Will kill any active commands.
     pub(crate) fn stop(&mut self) {
         if let Some((join_handle, kill)) = self.runner_thread.take() {
-            kill.notify_all();
+            loop {
+                kill.notify_all();
+                std::thread::sleep(Duration::from_millis(5));
+                if join_handle.is_finished() {
+                    break;
+                }
+            }
 
             let _ = join_handle.join();
             self.queue_len
-                .store(0usize, std::sync::atomic::Ordering::Release);
-            *self.empty_mutex.lock() = true;
+                .store(0usize, std::sync::atomic::Ordering::SeqCst);
             self.empty.notify_all();
-            *self.empty_mutex.lock() = false;
         }
     }
     /// Run this scheduler.
@@ -171,10 +188,11 @@ impl CommandScheduler {
     pub(crate) fn run(&mut self, ctx: FtcContext) {
         let commands = self.commands.clone();
         let empty = self.empty.clone();
-        let empty_mutex = self.empty_mutex.clone();
         let queue_len = self.queue_len.clone();
         let kill = Arc::new(Condvar::new());
         let (kill_runner, kill_mutex_runner) = (kill.clone(), Mutex::new(false));
+
+        self.context = Some(ctx.clone());
 
         self.runner_thread = Some((
             std::thread::Builder::new()
@@ -196,10 +214,10 @@ impl CommandScheduler {
                         }
                         let mut commands_locked = commands.lock();
 
-                        queue_len
-                            .store(commands_locked.len(), std::sync::atomic::Ordering::Release);
+                        queue_len.store(commands_locked.len(), std::sync::atomic::Ordering::SeqCst);
 
                         std::thread::scope(|s| {
+                            let mut handles = Vec::with_capacity(commands_locked.len());
                             for (
                                 id,
                                 StoredCommand {
@@ -214,13 +232,14 @@ impl CommandScheduler {
                                 let subsystems = subsystems.clone();
                                 let dependencies = dependencies.clone();
 
-                                s.spawn(move || {
+                                let handle = s.spawn(move || {
                                     ctx.init_thread();
                                     let res = catch_unwind(AssertUnwindSafe(|| {
                                         match state {
                                             CommandState::Finished
                                             | CommandState::Panicked(_)
-                                            | CommandState::DependenciesUsed(_) => {}
+                                            | CommandState::DependenciesUsed(_)
+                                            | CommandState::Cancelled => {}
                                             CommandState::Uninitialized => {
                                                 let mut subsystems = subsystems.write();
                                                 let mut dependencies = dependencies.write();
@@ -294,7 +313,7 @@ impl CommandScheduler {
                                         }
 
                                         let mut dependencies = dependencies.write();
-                                        let cmd_dependencies = dependencies.get_mut(id).unwrap();
+                                        let cmd_dependencies = dependencies.entry(*id).or_default();
 
                                         if *state != CommandState::Finished
                                             && !matches!(*state, CommandState::Panicked(_))
@@ -327,12 +346,21 @@ impl CommandScheduler {
                                         }
                                     }
                                 });
+                                handles.push(handle);
+                            }
+
+                            std::thread::sleep(Duration::from_millis(10));
+                            for handle in &handles {
+                                if !handle.is_finished() && !ctx.running() {
+                                    warn!(
+                                        "command not finished with current stage after 20ms \
+                                            and opmode supposed to stop; please fix your code"
+                                    );
+                                }
                             }
                         });
 
-                        *empty_mutex.lock() = true;
                         empty.notify_all();
-                        *empty_mutex.lock() = false;
                         std::thread::yield_now();
                     }
                 })
@@ -514,7 +542,7 @@ impl<A: Command, B: Command> Command for Parallel<A, B> {
 }
 
 /// A bunch of subsystems provided for use with a command.
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct SubsystemMap {
     subsystems: HashMap<SubsystemHandle<dyn Subsystem>, Box<dyn Subsystem>>,
 }
@@ -615,7 +643,7 @@ impl<S: Subsystem + ?Sized> Copy for SubsystemHandle<S> {}
 impl<S: Subsystem + ?Sized> Debug for SubsystemHandle<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("SubsystemHandle")
-            .field(&self.id.load(Ordering::Relaxed))
+            .field(&self.id.load(Ordering::SeqCst))
             .finish()
     }
 }

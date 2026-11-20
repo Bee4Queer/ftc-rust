@@ -582,7 +582,7 @@ public class {class_name} extends {2} {{
 
                         ::#ftc::log::trace!(concat!("finished executing ", stringify!(#class_name), ", waiting until scheduler queue clear"));
 
-                        ::#ftc::command::get_scheduler().wait_until_queue_clear();
+                        ::#ftc::command::get_scheduler_mut().wait_until_queue_clear_and_stop();
 
                         Ok(())
                     });
